@@ -1,0 +1,259 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-cyan: #00f2fe;
+  --color-blue: #4facfe;
+  --color-purple: #7f00ff;
+  --color-pink: #e100ff;
+  --color-emerald: #00f5a0;
+  --color-amber: #ffaa00;
+  --color-rose: #ff3366;
+
+  --theme-accent: #00f2fe;
+  --theme-glow: rgba(0, 242, 254, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #08090e;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(0, 242, 254, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 100% 100%, rgba(127, 0, 255, 0.06) 0%, transparent 40%),
+    radial-gradient(circle at 0% 100%, rgba(0, 245, 160, 0.05) 0%, transparent 40%),
+    linear-gradient(180deg, #090a0f 0%, #050608 100%);
+  color: #f1f5f9;
+  font-family: var(--font-sans);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Frameless Window Draggable Regions */
+.app-drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 2026 Neo-Glassmorphism Core Classes */
+.glass-panel {
+  background: rgba(14, 17, 27, 0.72);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.glass-card {
+  background: rgba(18, 22, 34, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card-interactive {
+  background: rgba(18, 22, 34, 0.6);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card-interactive:hover {
+  background: rgba(26, 31, 48, 0.75);
+  border-color: rgba(0, 242, 254, 0.35);
+  box-shadow: 0 12px 30px -5px rgba(0, 242, 254, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.glass-input {
+  background: rgba(10, 13, 22, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-family: var(--font-mono);
+  transition: all 0.2s ease;
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: #00f2fe;
+  background: rgba(13, 17, 30, 0.95);
+  box-shadow: 0 0 16px -2px rgba(0, 242, 254, 0.4), inset 0 0 8px rgba(0, 242, 254, 0.1);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+}
+
+/* Neon Glow Utilities */
+.neon-glow-cyan {
+  box-shadow: 0 0 20px -3px rgba(0, 242, 254, 0.45);
+}
+
+.neon-glow-purple {
+  box-shadow: 0 0 20px -3px rgba(127, 0, 255, 0.45);
+}
+
+.neon-glow-emerald {
+  box-shadow: 0 0 20px -3px rgba(0, 245, 160, 0.45);
+}
+
+.neon-glow-rose {
+  box-shadow: 0 0 20px -3px rgba(255, 51, 102, 0.45);
+}
+
+.neon-glow-amber {
+  box-shadow: 0 0 20px -3px rgba(255, 170, 0, 0.45);
+}
+
+.neon-text-cyan {
+  text-shadow: 0 0 12px rgba(0, 242, 254, 0.6);
+}
+
+.neon-text-purple {
+  text-shadow: 0 0 12px rgba(127, 0, 255, 0.6);
+}
+
+.neon-text-emerald {
+  text-shadow: 0 0 12px rgba(0, 245, 160, 0.6);
+}
+
+.neon-text-rose {
+  text-shadow: 0 0 12px rgba(255, 51, 102, 0.6);
+}
+
+/* Cyber Matrix Background Grid */
+.cyber-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* Futuristic Neon Range Slider */
+input[type="range"].neon-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  outline: none;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+input[type="range"].neon-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #00f2fe;
+  cursor: pointer;
+  box-shadow: 0 0 14px 2px rgba(0, 242, 254, 0.8), 0 0 2px 1px #ffffff;
+  border: 2px solid #ffffff;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+input[type="range"].neon-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 20px 4px rgba(0, 242, 254, 1), 0 0 4px 1px #ffffff;
+}
+
+input[type="range"].neon-slider::-webkit-slider-thumb:active {
+  transform: scale(1.1);
+}
+
+/* Futuristic Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 13, 20, 0.4);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 242, 254, 0.5);
+  box-shadow: 0 0 8px rgba(0, 242, 254, 0.4);
+}
+
+/* Pulsing Radar Keyframes */
+@keyframes radarPing {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.15;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+.animate-radar {
+  animation: radarPing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes pulseGlowSlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 12px rgba(0, 242, 254, 0.4));
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 24px rgba(0, 242, 254, 0.8));
+    opacity: 0.85;
+  }
+}
+
+.animate-glow-pulse {
+  animation: pulseGlowSlow 2.5s ease-in-out infinite;
+}
+
+@keyframes scanlineAnim {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(1000%);
+  }
+}
+
+.scanline {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 242, 254, 0.3), transparent);
+  opacity: 0.6;
+  animation: scanlineAnim 8s linear infinite;
+  pointer-events: none;
+}

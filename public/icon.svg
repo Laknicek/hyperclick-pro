@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#141E30" />
+      <stop offset="60%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#050811" />
+    </radialGradient>
+
+    <!-- Neon Rim Gradient -->
+    <linearGradient id="neonRim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="35%" stop-color="#4FACFE" />
+      <stop offset="70%" stop-color="#7F00FF" />
+      <stop offset="100%" stop-color="#FF007F" />
+    </linearGradient>
+
+    <!-- Inner Shield Gradient -->
+    <linearGradient id="shieldGrad" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Lightning Bolt Gradient -->
+    <linearGradient id="lightningGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="25%" stop-color="#00FFFF" />
+      <stop offset="60%" stop-color="#00D2FF" />
+      <stop offset="100%" stop-color="#3A7BD5" />
+    </linearGradient>
+
+    <!-- Cursor Pointer Gradient -->
+    <linearGradient id="cursorGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="30%" stop-color="#7000FF" />
+      <stop offset="85%" stop-color="#D946EF" />
+      <stop offset="100%" stop-color="#EC4899" />
+    </linearGradient>
+
+    <!-- Laser Gold Energy Accent -->
+    <linearGradient id="energyGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE000" />
+      <stop offset="100%" stop-color="#799F0C" />
+    </linearGradient>
+
+    <!-- Drop Glow Filter -->
+    <filter id="hyperGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur1" />
+      <feGaussianBlur stdDeviation="24" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="boltGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComponentTransfer in="blur" result="glow">
+        <feFuncA type="linear" slope="1.5" />
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="glow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Base Dark Canvas with Rounded Squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGlow)" />
+
+  <!-- Outer Cyber Hexagon / Shield Base -->
+  <path d="M 256,36 L 444,116 L 444,352 L 256,476 L 68,352 L 68,116 Z"
+        fill="url(#shieldGrad)"
+        stroke="url(#neonRim)"
+        stroke-width="7"
+        stroke-linejoin="round"
+        filter="url(#hyperGlow)" />
+
+  <!-- Inner HUD Grid Lines & Reticle Arcs -->
+  <circle cx="256" cy="256" r="148" fill="none" stroke="#00F2FE" stroke-width="1.5" stroke-dasharray="14 10" opacity="0.35" />
+  <circle cx="256" cy="256" r="182" fill="none" stroke="#7F00FF" stroke-width="1" stroke-dasharray="6 8" opacity="0.25" />
+  
+  <!-- Crosshairs -->
+  <line x1="256" y1="64" x2="256" y2="100" stroke="#00F2FE" stroke-width="3" opacity="0.8" />
+  <line x1="256" y1="412" x2="256" y2="448" stroke="#00F2FE" stroke-width="3" opacity="0.8" />
+  <line x1="96" y1="256" x2="132" y2="256" stroke="#7F00FF" stroke-width="3" opacity="0.8" />
+  <line x1="380" y1="256" x2="416" y2="256" stroke="#7F00FF" stroke-width="3" opacity="0.8" />
+
+  <!-- Corner Tech Accents -->
+  <circle cx="256" cy="36" r="5" fill="#00FFFF" />
+  <circle cx="444" cy="116" r="5" fill="#00F2FE" />
+  <circle cx="444" cy="352" r="5" fill="#7F00FF" />
+  <circle cx="256" cy="476" r="5" fill="#FF007F" />
+  <circle cx="68" cy="352" r="5" fill="#7F00FF" />
+  <circle cx="68" cy="116" r="5" fill="#00F2FE" />
+
+  <!-- 2026 Stealth Cursor (Upper-Left Wing) -->
+  <path d="M 168,140 L 320,270 L 250,285 L 295,376 L 252,396 L 208,306 L 168,348 Z"
+        fill="url(#cursorGrad)"
+        stroke="#FFFFFF"
+        stroke-width="4"
+        stroke-linejoin="round"
+        opacity="0.95"
+        filter="url(#hyperGlow)" />
+
+  <!-- Central Supercharged Lightning Bolt (Cutting through speed) -->
+  <path d="M 284,92 L 180,248 L 246,248 L 204,420 L 344,228 L 274,228 Z"
+        fill="url(#lightningGrad)"
+        stroke="#FFFFFF"
+        stroke-width="3.5"
+        stroke-linejoin="miter"
+        filter="url(#boltGlow)" />
+
+  <!-- High-Energy Impact Spark / Core Burst -->
+  <circle cx="256" cy="244" r="16" fill="#FFFFFF" opacity="0.9" filter="url(#boltGlow)" />
+  <circle cx="256" cy="244" r="7" fill="#00FFFF" />
+
+  <!-- Speed Shockwave Wings -->
+  <path d="M 330,170 Q 370,200 388,256 Q 370,312 330,342"
+        fill="none"
+        stroke="#00FFFF"
+        stroke-width="4"
+        stroke-linecap="round"
+        opacity="0.8" />
+  <path d="M 360,195 Q 395,225 408,256 Q 395,287 360,317"
+        fill="none"
+        stroke="#FF007F"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.6" />
+
+  <!-- Futuristic "PRO" Monogram Badge at Bottom Center -->
+  <rect x="206" y="420" width="100" height="26" rx="6" fill="#090d16" stroke="#00F2FE" stroke-width="1.5" />
+  <text x="256" y="438" font-family="'Segoe UI', Roboto, 'Helvetica Neue', sans-serif" font-weight="900" font-size="14" fill="#00FFFF" text-anchor="middle" letter-spacing="4">2026 PRO</text>
+</svg>

@@ -1,0 +1,120 @@
+name: Build & Release HyperClick Pro 2026
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: 'Create as Draft Release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as Pre-release'
+        required: false
+        type: boolean
+        default: false
+      custom_notes:
+        description: 'Optional Custom Release Notes Override'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Windows Binaries & Release
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ⚙️ Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: npm ci
+
+      - name: 🔍 TypeCheck & Build Application
+        run: |
+          npm run build
+          npm run build:electron
+
+      - name: 🔨 Package Windows Binaries (NSIS + Portable)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx electron-builder --win nsis portable --publish never
+
+      - name: 📝 Generate Release Changelog
+        id: changelog
+        shell: bash
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+
+          if [ -z "$CURRENT_TAG" ] || [ "$CURRENT_TAG" = "refs/heads/main" ]; then
+            CURRENT_TAG="v$(node -p "require('./package.json').version")"
+          fi
+
+          echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
+
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log --pretty=format:"* %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" "$PREV_TAG..HEAD")
+          else
+            CHANGES=$(git log -n 25 --pretty=format:"* %s ([%h](https://github.com/${{ github.repository }}/commit/%H))")
+          fi
+
+          # Output multiline string
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          if [ -n "${{ inputs.custom_notes }}" ]; then
+            echo "${{ inputs.custom_notes }}" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+          fi
+          echo "## ⚡ HyperClick Pro $CURRENT_TAG - Release Highlights" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 🚀 What's Changed" >> $GITHUB_OUTPUT
+          echo "$CHANGES" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 📦 Binaries Included" >> $GITHUB_OUTPUT
+          echo "- **HyperClick Pro Setup (NSIS Installer)**: Standard Windows installer with auto-update support." >> $GITHUB_OUTPUT
+          echo "- **HyperClick Pro Portable (.exe)**: Standalone portable executable with zero installation needed." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "> Built with Node 24, Vite 6, Electron 34, and React 19." >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 🚀 Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: HyperClick Pro ${{ steps.changelog.outputs.current_tag }}
+          tag_name: ${{ steps.changelog.outputs.current_tag }}
+          body: ${{ steps.changelog.outputs.release_body }}
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
+          files: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 💾 Upload Artifacts to Workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperClick-Pro-Windows-Executables
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+          retention-days: 14
