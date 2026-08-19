@@ -743,7 +743,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <label className="flex items-center justify-between p-3.5 rounded-xl bg-surface-50 border border-surface-200 cursor-pointer">
                       <div>
                         <span className="text-xs font-semibold text-white block">Microsecond Precision Timer</span>
-                        <span className="text-[11px] text-gray-400">Bypasses standard 15ms Windows timer coalescing for sub-millisecond accuracy</span>
+                        <span className="text-[11px] text-gray-400">High-resolution timer scheduler for sub-millisecond click accuracy</span>
                       </div>
                       <input
                         type="checkbox"
@@ -759,8 +759,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                     <label className="flex items-center justify-between p-3.5 rounded-xl bg-surface-50 border border-surface-200 cursor-pointer">
                       <div>
-                        <span className="text-xs font-semibold text-white block">Direct Raw Input Simulation</span>
-                        <span className="text-[11px] text-gray-400">Injects clicks directly into input queue bypassing desktop composition lag</span>
+                        <span className="text-xs font-semibold text-white block">Direct Win32 Input Queue</span>
+                        <span className="text-[11px] text-gray-400">Dispatches input events directly through high-speed native Windows SendInput</span>
                       </div>
                       <input
                         type="checkbox"

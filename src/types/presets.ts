@@ -8,7 +8,7 @@ export type PresetClickType = 'single' | 'double' | 'triple' | 'hold' | 'burst' 
 
 export type PresetTriggerMode = 'toggle' | 'hold' | 'repeat_n_times' | 'duration_timer';
 
-export type PresetCategory = 'gaming' | 'productivity' | 'afk' | 'stealth' | 'testing' | 'custom';
+export type PresetCategory = 'gaming' | 'productivity' | 'accessibility' | 'testing' | 'automation' | 'custom' | 'afk' | 'stealth';
 
 export type HumanizerAlgorithmType = 
   | 'off'
@@ -18,7 +18,9 @@ export type HumanizerAlgorithmType =
   | 'jitter_god'
   | 'butterfly'
   | 'bimodal'
-  | 'stealth_human';
+  | 'stealth_human'
+  | 'natural_rhythm'
+  | 'ergonomic_assist';
 
 export interface PresetHumanizerConfig {
   enabled: boolean;
@@ -33,7 +35,7 @@ export interface PresetHumanizerConfig {
   microPauseMaxMs: number;
   cursorJitter: boolean;         // Micro cursor displacement (pixel variance)
   cursorJitterRadiusPx: number;  // Radius in pixels for micro-nudge
-  bimodalSpreadRatio?: number;   // For butterfly click 2-finger asymmetry (e.g., 0.35)
+  bimodalSpreadRatio?: number;   // Rhythm asymmetry
 }
 
 export interface PresetBurstConfig {
@@ -72,12 +74,14 @@ export interface PresetLocationConfig {
   restoreCursorPositionAfterClick?: boolean;
 }
 
-export interface PresetAntiDetectionConfig {
+export interface PresetErgonomicConfig {
   enabled: boolean;
-  noiseInjection: boolean;
-  entropyMultiplier: number;
-  blockBlacklistedWindows: boolean;
-  simulatedHardwareEvents: boolean;
+  naturalRhythmVariation?: boolean;
+  entropyMultiplier?: number;
+  autoRestReminder?: boolean;
+  noiseInjection?: boolean;
+  blockBlacklistedWindows?: boolean;
+  simulatedHardwareEvents?: boolean;
 }
 
 export interface PresetProfile {
@@ -101,7 +105,8 @@ export interface PresetProfile {
   humanizer: PresetHumanizerConfig;
   location: PresetLocationConfig;
   sequence?: PresetSequenceStep[];
-  antiDetection: PresetAntiDetectionConfig;
+  antiDetection?: PresetErgonomicConfig;
+  ergonomics?: PresetErgonomicConfig;
   isBuiltIn: boolean;
   isFavorite?: boolean;
   createdAt: string;
@@ -162,7 +167,8 @@ export interface PresetPerformanceSettings {
   highPrecisionTimer: boolean;
   targetPollRateHz: number;
   processPriority: 'normal' | 'high' | 'realtime';
-  enableRawInputBypass: boolean;
+  enableDirectInputQueue?: boolean;
+  enableRawInputBypass?: boolean;
 }
 
 export interface GlobalAppSettings {

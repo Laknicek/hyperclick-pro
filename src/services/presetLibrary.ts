@@ -414,16 +414,16 @@ export const BUILTIN_PRESETS: PresetProfile[] = [
     version: '1.0.0',
   },
   {
-    id: 'builtin-stealth-natural-human',
-    name: 'Stealth Natural Human',
-    category: 'stealth',
-    description: 'Gold-standard anti-cheat bypass profile. Maintains 6-8 CPS with an indistinguishable human biological distribution, Gaussian entropy variance, natural muscle fatigue, and organic micro-hesitations.',
-    icon: 'Shield',
-    tags: ['Stealth', 'Undetectable', 'Humanized', 'Anti-Cheat Safe', 'Organic Curve'],
-    cps: 7.2,
-    targetCpsRange: [6, 8],
-    intervalMs: 138,
-    intervalRangeMs: [125, 166],
+    id: 'builtin-accessibility-assist',
+    name: 'Accessibility Steady Assist',
+    category: 'accessibility',
+    description: 'Gentle, steady 4 CPS assistive clicking designed to alleviate repetitive strain injury (RSI) and provide hands-free accessibility.',
+    icon: 'Heart',
+    tags: ['Accessibility', 'Assistive', 'Ergonomic', 'Low Strain', 'RSI Relief'],
+    cps: 4.0,
+    targetCpsRange: [3, 5],
+    intervalMs: 250,
+    intervalRangeMs: [240, 260],
     button: 'left',
     clickType: 'single',
     triggerMode: 'toggle',
@@ -431,23 +431,22 @@ export const BUILTIN_PRESETS: PresetProfile[] = [
     burst: {
       enabled: false,
       clicksPerBurst: 1,
-      burstCps: 7,
+      burstCps: 4,
       cooldownMs: 0,
     },
     humanizer: {
       enabled: true,
-      algorithm: 'stealth_human',
-      jitterMs: 28,
-      minIntervalMs: 110,
-      maxIntervalMs: 195,
-      fatigueFactor: 0.55,
-      microPauses: true,
-      microPauseProbability: 0.12,
-      microPauseMinMs: 110,
-      microPauseMaxMs: 280,
-      cursorJitter: true,
-      cursorJitterRadiusPx: 2.2,
-      bimodalSpreadRatio: 0.15,
+      algorithm: 'gaussian',
+      jitterMs: 10,
+      minIntervalMs: 230,
+      maxIntervalMs: 270,
+      fatigueFactor: 0.0,
+      microPauses: false,
+      microPauseProbability: 0,
+      microPauseMinMs: 0,
+      microPauseMaxMs: 0,
+      cursorJitter: false,
+      cursorJitterRadiusPx: 0,
     },
     location: {
       mode: 'current_cursor',
@@ -457,10 +456,10 @@ export const BUILTIN_PRESETS: PresetProfile[] = [
     },
     antiDetection: {
       enabled: true,
-      noiseInjection: true,
-      entropyMultiplier: 2.2,
-      blockBlacklistedWindows: true,
-      simulatedHardwareEvents: true,
+      noiseInjection: false,
+      entropyMultiplier: 1.0,
+      autoRestReminder: true,
+      naturalRhythmVariation: true,
     },
     isBuiltIn: true,
     isFavorite: true,
@@ -597,23 +596,23 @@ export const PRESET_CATEGORIES: {
   },
   {
     id: 'gaming',
-    label: 'Gaming & PvP',
+    label: 'Gaming & Idle Games',
     icon: 'Gamepad2',
-    description: 'High-CPS, jitter, butterfly, and tactical burst profiles for esports',
+    description: 'High-CPS, jitter, butterfly, and burst profiles for clicker and management games',
     badgeColor: 'border-accent-cyan/40 text-accent-cyan bg-accent-cyan/10',
   },
   {
-    id: 'stealth',
-    label: 'Stealth & Anti-Cheat',
-    icon: 'Shield',
-    description: 'Biological Gaussian variance and human muscle simulation',
+    id: 'accessibility',
+    label: 'Accessibility & Ergonomics',
+    icon: 'Heart',
+    description: 'Gentle cadence assistance for RSI prevention and motor ergonomics',
     badgeColor: 'border-accent-emerald/40 text-accent-emerald bg-accent-emerald/10',
   },
   {
-    id: 'afk',
-    label: 'AFK & Anti-Idle',
-    icon: 'Clock',
-    description: 'Roblox, MMO, and idling automation with randomized triggers',
+    id: 'automation',
+    label: 'Desktop Automation',
+    icon: 'Workflow',
+    description: 'Sequential form navigation and multi-step desktop macros',
     badgeColor: 'border-accent-amber/40 text-accent-amber bg-accent-amber/10',
   },
   {
@@ -729,8 +728,8 @@ export function createCustomProfileFromPreset(
 export function getPresetStats(presets: PresetProfile[]) {
   const total = presets.length;
   const gamingCount = presets.filter((p) => p.category === 'gaming').length;
-  const afkCount = presets.filter((p) => p.category === 'afk').length;
-  const stealthCount = presets.filter((p) => p.category === 'stealth').length;
+  const accessibilityCount = presets.filter((p) => p.category === 'accessibility').length;
+  const automationCount = presets.filter((p) => p.category === 'automation').length;
   const productivityCount = presets.filter((p) => p.category === 'productivity').length;
   const testingCount = presets.filter((p) => p.category === 'testing').length;
   const customCount = presets.filter((p) => !p.isBuiltIn).length;
@@ -740,8 +739,8 @@ export function getPresetStats(presets: PresetProfile[]) {
   return {
     total,
     gamingCount,
-    afkCount,
-    stealthCount,
+    accessibilityCount,
+    automationCount,
     productivityCount,
     testingCount,
     customCount,

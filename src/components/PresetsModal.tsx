@@ -859,9 +859,9 @@ export const PresetsModal: React.FC<PresetsModalProps> = ({
                     onChange={(e) => setNewProfileCategory(e.target.value as PresetCategory)}
                     className="w-full px-3 py-2 rounded-xl bg-background border border-surface-200 text-white focus:outline-none focus:border-accent-cyan"
                   >
-                    <option value="gaming">Gaming & PvP</option>
-                    <option value="stealth">Stealth & Anti-Cheat</option>
-                    <option value="afk">AFK & Anti-Idle</option>
+                    <option value="gaming">Gaming & Idle Games</option>
+                    <option value="accessibility">Accessibility & Ergonomics</option>
+                    <option value="automation">Desktop Automation</option>
                     <option value="productivity">Productivity & Office</option>
                     <option value="testing">QA & Benchmark</option>
                     <option value="custom">Custom</option>

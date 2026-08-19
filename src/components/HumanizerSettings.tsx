@@ -108,14 +108,14 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                Humanizer & Anti-Cheat Bypasser
+                Ergonomic Rhythm & Motion Assist
               </h2>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                AI Stealth
+                Natural Cadence
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Simulates organic human muscle variance, natural fatigue, and non-linear cursor physics.
+              Simulates organic human muscle variance, natural fatigue, and smooth non-linear cursor physics.
             </p>
           </div>
         </div>
@@ -249,7 +249,7 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
             />
           </div>
 
-          {/* Anti-Cheat Human Fatigue Simulation */}
+          {/* Ergonomic Human Fatigue Simulation */}
           <div className="bg-surface-50 p-3 rounded-xl border border-white/[0.04] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Coffee className="w-4 h-4 text-amber-400" />

@@ -1,15 +1,15 @@
 /**
  * HyperClick Pro 2026 - Comprehensive Automation & Sequence Types
- * Complete definitions for Clicker, Multi-Point Waypoints, Macros, Pixel Triggers, Telemetry, and Humanizer
+ * Definitions for Clicker, Multi-Point Waypoints, Macros, Telemetry, and Hand Ergonomics
  */
 
 export type MouseButton = 'left' | 'right' | 'middle' | 'mouse4' | 'mouse5';
 
 export type ClickType = 'single' | 'double' | 'triple' | 'hold' | 'burst';
 
-export type ClickLocationMode = 'cursor' | 'static' | 'waypoint' | 'area_random' | 'smart_pixel';
+export type ClickLocationMode = 'cursor' | 'static' | 'waypoint' | 'area_random';
 
-export type ClickRepeatMode = 'infinite' | 'count' | 'duration' | 'until_pixel_match';
+export type ClickRepeatMode = 'infinite' | 'count' | 'duration';
 
 export type HumanizerAlgorithm = 
   | 'gaussian'
@@ -30,11 +30,10 @@ export type SoundTheme =
 export type ProfileCategory = 
   | 'gaming'
   | 'productivity'
-  | 'afk'
+  | 'accessibility'
   | 'custom'
-  | 'cookie_clicker'
-  | 'fps'
-  | 'mmo'
+  | 'idle_games'
+  | 'qa_testing'
   | 'automation';
 
 export type WaypointActionType = 
@@ -46,8 +45,7 @@ export type WaypointActionType =
   | 'drag_to'
   | 'key_press'
   | 'wait'
-  | 'wheel_scroll'
-  | 'pixel_check';
+  | 'wheel_scroll';
 
 export type SequenceTraversalMode = 
   | 'ordered'
@@ -62,26 +60,6 @@ export type MacroExecutionState =
   | 'stopped'
   | 'stepping'
   | 'recording';
-
-export type PixelTriggerCondition = 
-  | 'color_matches'
-  | 'color_differs'
-  | 'color_brightness_greater'
-  | 'color_brightness_less'
-  | 'color_in_range';
-
-export type PixelTriggerAction = 
-  | 'click'
-  | 'double_click'
-  | 'right_click'
-  | 'start_macro'
-  | 'stop_all'
-  | 'custom_sequence';
-
-export type PixelClickCoordinateMode = 
-  | 'at_pixel'
-  | 'at_cursor'
-  | 'at_fixed_point';
 
 export interface RgbColor {
   r: number;
@@ -124,11 +102,6 @@ export interface Waypoint {
   targetY?: number; // Used for drag_to
   key?: string; // Used for key_press
   scrollAmount?: number; // Used for wheel_scroll
-  colorCondition?: {
-    expectedColorHex: string;
-    tolerance: number;
-    condition: PixelTriggerCondition;
-  };
   note?: string;
   speedMultiplier?: number;
 }
@@ -143,8 +116,7 @@ export interface MacroAction {
     | 'key_down'
     | 'key_up'
     | 'wait'
-    | 'scroll'
-    | 'pixel_check';
+    | 'scroll';
   timestamp: number;
   relativeTimeMs: number;
   x?: number;
@@ -154,8 +126,6 @@ export interface MacroAction {
   keyCode?: number;
   deltaX?: number;
   deltaY?: number;
-  expectedColor?: string;
-  tolerance?: number;
 }
 
 export interface MacroSequence {
@@ -201,41 +171,16 @@ export interface HotkeyConfig {
   toggleClicker: string;
   toggleMacro: string;
   recordMacro: string;
-  togglePixelTrigger: string;
   emergencyStop: string;
   pickCoordinate: string;
-  pickPixelColor: string;
   stepMacro: string;
   nextProfile: string;
   prevProfile: string;
 }
 
-export interface PixelTriggerConfig {
-  id: string;
-  name: string;
-  enabled: boolean;
-  targetX: number;
-  targetY: number;
-  expectedColorHex: string;
-  expectedColorRgb: RgbColor;
-  tolerance: number; // 0 to 100
-  checkIntervalMs: number; // Milliseconds between screen checks
-  triggerAction: PixelTriggerAction;
-  actionDelayMs: number;
-  triggerCondition: PixelTriggerCondition;
-  clickCoordinateMode: PixelClickCoordinateMode;
-  clickX?: number;
-  clickY?: number;
-  maxTriggersPerMinute: number;
-  cooldownMs: number;
-  soundAlert: boolean;
-  areaScanRadius?: number; // 0 for single pixel, >0 for N px radius search box
-  macroSequenceId?: string;
-}
-
 export interface ClickerConfig {
   id: string;
-  mode: 'cps' | 'interval' | 'burst' | 'hold' | 'sequence' | 'pixel_trigger';
+  mode: 'cps' | 'interval' | 'burst' | 'hold' | 'sequence';
   cps: number;
   intervalMs: number;
   clickType: ClickType;
@@ -270,7 +215,6 @@ export interface TelemetryStats {
   lastClickTimestamp: number;
   waypointsCompleted: number;
   macroLoopsCompleted: number;
-  pixelTriggersFired: number;
   errorCount: number;
   clickHistory: { timestamp: number; cps: number }[];
 }
@@ -282,7 +226,6 @@ export interface ProfilePreset {
   category: ProfileCategory;
   config: Partial<ClickerConfig>;
   macroSequence?: MacroSequence;
-  pixelTrigger?: PixelTriggerConfig;
   hotkey?: string;
   icon?: string;
   isDefault?: boolean;
@@ -296,14 +239,14 @@ export function createDefaultHumanizerConfig(): HumanizerConfig {
   return {
     enabled: true,
     algorithm: 'gaussian',
-    variancePercent: 18,
-    minIntervalMs: 15,
-    maxIntervalMs: 150,
-    fatigueRampMinutes: 15,
-    microPauseFrequency: 0.03,
-    microPauseDurationMs: 350,
+    variancePercent: 15,
+    minIntervalMs: 20,
+    maxIntervalMs: 120,
+    fatigueRampMinutes: 20,
+    microPauseFrequency: 0.02,
+    microPauseDurationMs: 250,
     overshootCorrection: true,
-    jitterRadiusPx: 3,
+    jitterRadiusPx: 2,
   };
 }
 
@@ -312,7 +255,7 @@ export function createDefaultSoundConfig(): SoundConfig {
     enabled: true,
     soundTheme: 'cherry_mx_brown',
     volume: 0.45,
-    pitchVariance: 0.12,
+    pitchVariance: 0.10,
     soundOnDownOnly: true,
   };
 }
@@ -322,10 +265,8 @@ export function createDefaultHotkeyConfig(): HotkeyConfig {
     toggleClicker: 'F6',
     toggleMacro: 'F7',
     recordMacro: 'Ctrl+Shift+R',
-    togglePixelTrigger: 'F8',
     emergencyStop: 'F12',
     pickCoordinate: 'F9',
-    pickPixelColor: 'F10',
     stepMacro: 'F11',
     nextProfile: 'Ctrl+PageDown',
     prevProfile: 'Ctrl+PageUp',
@@ -355,12 +296,12 @@ export function createDefaultWaypoint(index: number = 1, x: number = 960, y: num
 export function createDefaultMacroSequence(): MacroSequence {
   return {
     id: `seq_${Date.now()}`,
-    name: 'Standard Sequence Alpha',
-    description: 'Multi-target sequential precision pathing with humanized Bezier curves',
+    name: 'Spreadsheet Row Iterator',
+    description: 'Automated data entry pattern: click cell, move, and advance with steady pace',
     waypoints: [
       {
         id: 'wp_1',
-        name: 'Target Alpha',
+        name: 'Target Cell Alpha',
         x: 450,
         y: 350,
         actionType: 'click',
@@ -368,43 +309,43 @@ export function createDefaultMacroSequence(): MacroSequence {
         mouseButton: 'left',
         delayBeforeMs: 100,
         delayAfterMs: 300,
-        jitterRadius: 2,
+        jitterRadius: 1,
         holdDurationMs: 40,
         loopRepeat: 1,
         enabled: true,
-        note: 'First interact point',
+        note: 'First data cell',
       },
       {
         id: 'wp_2',
-        name: 'Inventory Slot 3',
+        name: 'Next Input Field',
         x: 720,
-        y: 420,
+        y: 350,
         actionType: 'click',
         clickType: 'single',
         mouseButton: 'left',
         delayBeforeMs: 150,
         delayAfterMs: 250,
-        jitterRadius: 3,
+        jitterRadius: 1,
         holdDurationMs: 35,
         loopRepeat: 1,
         enabled: true,
-        note: 'Select secondary tool',
+        note: 'Second input column',
       },
       {
         id: 'wp_3',
-        name: 'Confirm Dialog Button',
+        name: 'Submit / Save Button',
         x: 960,
         y: 650,
-        actionType: 'double_click',
-        clickType: 'double',
+        actionType: 'click',
+        clickType: 'single',
         mouseButton: 'left',
         delayBeforeMs: 200,
         delayAfterMs: 500,
-        jitterRadius: 2,
+        jitterRadius: 1,
         holdDurationMs: 30,
         loopRepeat: 1,
         enabled: true,
-        note: 'Execute action confirmation',
+        note: 'Confirm batch record',
       },
     ],
     loopCount: 0, // infinite
@@ -415,30 +356,8 @@ export function createDefaultMacroSequence(): MacroSequence {
     totalDurationEstimatedMs: 1540,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    tags: ['Standard', 'Productivity'],
+    tags: ['Productivity', 'Data Entry'],
     hotkey: 'F7',
-  };
-}
-
-export function createDefaultPixelTriggerConfig(): PixelTriggerConfig {
-  return {
-    id: `pt_${Date.now()}`,
-    name: 'Golden Target Detector',
-    enabled: false,
-    targetX: 960,
-    targetY: 540,
-    expectedColorHex: '#00F2FE',
-    expectedColorRgb: { r: 0, g: 242, b: 254 },
-    tolerance: 15,
-    checkIntervalMs: 60,
-    triggerAction: 'click',
-    actionDelayMs: 25,
-    triggerCondition: 'color_matches',
-    clickCoordinateMode: 'at_pixel',
-    maxTriggersPerMinute: 600,
-    cooldownMs: 150,
-    soundAlert: true,
-    areaScanRadius: 4,
   };
 }
 
@@ -453,7 +372,6 @@ export function createDefaultTelemetryStats(): TelemetryStats {
     lastClickTimestamp: 0,
     waypointsCompleted: 0,
     macroLoopsCompleted: 0,
-    pixelTriggersFired: 0,
     errorCount: 0,
     clickHistory: [],
   };
@@ -463,8 +381,8 @@ export function createDefaultClickerConfig(): ClickerConfig {
   return {
     id: 'cfg_default',
     mode: 'cps',
-    cps: 25,
-    intervalMs: 40,
+    cps: 20,
+    intervalMs: 50,
     clickType: 'single',
     mouseButton: 'left',
     clickLocationMode: 'cursor',
@@ -478,230 +396,111 @@ export function createDefaultClickerConfig(): ClickerConfig {
     humanizer: createDefaultHumanizerConfig(),
     sound: createDefaultSoundConfig(),
     hotkeys: createDefaultHotkeyConfig(),
-    activeProfileId: 'prof_mmo_rotation',
+    activeProfileId: 'prof_accessibility_assist',
   };
 }
 
 export const BUILT_IN_PROFILES: ProfilePreset[] = [
   {
-    id: 'prof_mmo_rotation',
-    name: 'MMO Skill & Target Cycle',
-    description: 'Rotates through 4 target hotbars with realistic mouse path curves and randomized pauses.',
-    category: 'mmo',
-    config: {
-      mode: 'sequence',
-      cps: 12,
-      mouseButton: 'left',
-      clickLocationMode: 'waypoint',
-    },
-    macroSequence: {
-      id: 'seq_mmo_rot',
-      name: '4-Point Skill Cycle',
-      description: 'Human-curved rotation sequence',
-      waypoints: [
-        {
-          id: 'wp_mmo_1',
-          name: 'Primary Skill (Q)',
-          x: 750,
-          y: 880,
-          actionType: 'click',
-          clickType: 'single',
-          mouseButton: 'left',
-          delayBeforeMs: 50,
-          delayAfterMs: 450,
-          jitterRadius: 3,
-          holdDurationMs: 40,
-          loopRepeat: 1,
-          enabled: true,
-          note: 'Primary DPS combo',
-        },
-        {
-          id: 'wp_mmo_2',
-          name: 'Secondary Skill (E)',
-          x: 820,
-          y: 880,
-          actionType: 'click',
-          clickType: 'single',
-          mouseButton: 'left',
-          delayBeforeMs: 80,
-          delayAfterMs: 600,
-          jitterRadius: 4,
-          holdDurationMs: 45,
-          loopRepeat: 1,
-          enabled: true,
-          note: 'Buff activation',
-        },
-        {
-          id: 'wp_mmo_3',
-          name: 'Ultimate Trigger (R)',
-          x: 890,
-          y: 880,
-          actionType: 'click',
-          clickType: 'single',
-          mouseButton: 'left',
-          delayBeforeMs: 120,
-          delayAfterMs: 900,
-          jitterRadius: 2,
-          holdDurationMs: 50,
-          loopRepeat: 1,
-          enabled: true,
-          note: 'Finisher burst',
-        },
-        {
-          id: 'wp_mmo_4',
-          name: 'Health Potion (1)',
-          x: 680,
-          y: 880,
-          actionType: 'click',
-          clickType: 'single',
-          mouseButton: 'left',
-          delayBeforeMs: 100,
-          delayAfterMs: 300,
-          jitterRadius: 3,
-          holdDurationMs: 35,
-          loopRepeat: 1,
-          enabled: true,
-          note: 'Safety sustain',
-        },
-      ],
-      loopCount: 0,
-      traversalMode: 'ordered',
-      humanizePaths: true,
-      speedMultiplier: 1.0,
-      bezierSmoothness: 0.7,
-      totalDurationEstimatedMs: 2545,
-      createdAt: 1700000000000,
-      updatedAt: 1700000000000,
-      tags: ['MMORPG', 'Skill Rotation'],
-      hotkey: 'F7',
-    },
-    isDefault: true,
-  },
-  {
-    id: 'prof_cookie_clicker',
-    name: 'Cookie Clicker Golden Rush',
-    description: 'Ultra-fast 85 CPS clicker linked with Pixel Detector to auto-hunt Golden Cookies anywhere on screen.',
-    category: 'cookie_clicker',
+    id: 'prof_accessibility_assist',
+    name: 'Accessibility Steady Assist',
+    description: 'Gentle 4 CPS ergonomic clicking assistance for users with repetitive strain injury (RSI) or motor fatigue.',
+    category: 'accessibility',
     config: {
       mode: 'cps',
-      cps: 85,
+      cps: 4,
       clickType: 'single',
       mouseButton: 'left',
       repeatMode: 'infinite',
     },
-    pixelTrigger: {
-      id: 'pt_golden_cookie',
-      name: 'Golden Shimmer Spotter',
-      enabled: true,
-      targetX: 960,
-      targetY: 540,
-      expectedColorHex: '#FFD700',
-      expectedColorRgb: { r: 255, g: 215, b: 0 },
-      tolerance: 20,
-      checkIntervalMs: 80,
-      triggerAction: 'click',
-      actionDelayMs: 10,
-      triggerCondition: 'color_matches',
-      clickCoordinateMode: 'at_pixel',
-      maxTriggersPerMinute: 300,
-      cooldownMs: 500,
-      soundAlert: true,
-      areaScanRadius: 20,
-    },
     hotkey: 'F6',
+    isDefault: true,
   },
   {
-    id: 'prof_fps_trigger',
-    name: 'FPS Fast-Tap & Trigger Bot',
-    description: 'Pistol single-fire rapid macro and crosshair pixel color change trigger for instantaneous reaction times.',
-    category: 'fps',
+    id: 'prof_idle_clicker',
+    name: 'Idle & Incremental Games',
+    description: 'Smooth 35 CPS continuous clicking for Cookie Clicker and incremental desktop management games.',
+    category: 'idle_games',
     config: {
-      mode: 'burst',
-      cps: 18,
-      burstCount: 3,
-      burstIntervalMs: 65,
+      mode: 'cps',
+      cps: 35,
+      clickType: 'single',
       mouseButton: 'left',
-      clickType: 'burst',
+      repeatMode: 'infinite',
     },
-    pixelTrigger: {
-      id: 'pt_crosshair_red',
-      name: 'Enemy Outline Detection',
-      enabled: false,
-      targetX: 960,
-      targetY: 540,
-      expectedColorHex: '#FF1133',
-      expectedColorRgb: { r: 255, g: 17, b: 51 },
-      tolerance: 18,
-      checkIntervalMs: 16,
-      triggerAction: 'click',
-      actionDelayMs: 5,
-      triggerCondition: 'color_matches',
-      clickCoordinateMode: 'at_pixel',
-      maxTriggersPerMinute: 1200,
-      cooldownMs: 80,
-      soundAlert: false,
-      areaScanRadius: 2,
+    hotkey: 'F7',
+  },
+  {
+    id: 'prof_qa_stress_test',
+    name: 'QA Software Stress Benchmark',
+    description: 'High-speed 200 CPS rapid event dispatcher for testing web app button throttling and UI durability.',
+    category: 'qa_testing',
+    config: {
+      mode: 'cps',
+      cps: 200,
+      clickType: 'single',
+      mouseButton: 'left',
+      repeatMode: 'count',
+      repeatCount: 1000,
     },
     hotkey: 'F8',
   },
   {
-    id: 'prof_afk_loot',
-    name: 'AFK Mining & Auto-Crafter',
-    description: 'Multi-node drag & drop sequence with drag-to inventory transfers and anti-cheat randomized jitter.',
-    category: 'afk',
+    id: 'prof_spreadsheet_auto',
+    name: 'Spreadsheet & Form Automation',
+    description: 'Multi-node sequential workflow for navigating form fields, data tables, and batch entry grids.',
+    category: 'productivity',
     config: {
       mode: 'sequence',
-      cps: 15,
+      cps: 10,
     },
     macroSequence: {
-      id: 'seq_afk_crafter',
-      name: 'Crafting Table Loop',
-      description: 'Move ingredients into 3x3 crafting grid',
+      id: 'seq_data_grid',
+      name: 'Data Table Entry Loop',
+      description: 'Tabulate and advance table rows',
       waypoints: [
         {
-          id: 'wp_craft_1',
-          name: 'Material Stack 1',
-          x: 600,
-          y: 700,
-          actionType: 'drag_to',
-          clickType: 'single',
-          mouseButton: 'left',
-          delayBeforeMs: 150,
-          delayAfterMs: 200,
-          jitterRadius: 2,
-          holdDurationMs: 60,
-          loopRepeat: 1,
-          enabled: true,
-          targetX: 850,
-          targetY: 450,
-          note: 'Drag iron into slot 1',
-        },
-        {
-          id: 'wp_craft_2',
-          name: 'Craft Result Slot',
-          x: 1100,
-          y: 450,
+          id: 'wp_cell_1',
+          name: 'Primary Cell Focus',
+          x: 500,
+          y: 400,
           actionType: 'click',
           clickType: 'single',
           mouseButton: 'left',
-          delayBeforeMs: 100,
-          delayAfterMs: 300,
-          jitterRadius: 2,
+          delayBeforeMs: 120,
+          delayAfterMs: 250,
+          jitterRadius: 1,
           holdDurationMs: 40,
-          loopRepeat: 5,
+          loopRepeat: 1,
           enabled: true,
-          note: 'Collect finished items',
+          note: 'Select first table cell',
+        },
+        {
+          id: 'wp_cell_2',
+          name: 'Next Column Field',
+          x: 750,
+          y: 400,
+          actionType: 'click',
+          clickType: 'single',
+          mouseButton: 'left',
+          delayBeforeMs: 150,
+          delayAfterMs: 300,
+          jitterRadius: 1,
+          holdDurationMs: 35,
+          loopRepeat: 1,
+          enabled: true,
+          note: 'Confirm value',
         },
       ],
-      loopCount: 50,
+      loopCount: 25,
       traversalMode: 'ordered',
       humanizePaths: true,
       speedMultiplier: 1.0,
-      bezierSmoothness: 0.8,
-      totalDurationEstimatedMs: 1800,
+      bezierSmoothness: 0.7,
+      totalDurationEstimatedMs: 850,
       createdAt: 1700000000000,
       updatedAt: 1700000000000,
-      tags: ['AFK', 'Crafting'],
+      tags: ['Productivity', 'Automation'],
     },
   },
 ];
@@ -753,7 +552,6 @@ export function validateAndSanitizeMacroSequence(raw: unknown): { isValid: boole
     'key_press',
     'wait',
     'wheel_scroll',
-    'pixel_check',
   ];
 
   const validButtons: MouseButton[] = ['left', 'right', 'middle', 'mouse4', 'mouse5'];

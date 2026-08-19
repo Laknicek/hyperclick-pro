@@ -82,7 +82,7 @@ hyperclick-pro/
 │   │   ├── Dashboard.tsx        # Single-point clicker control deck
 │   │   ├── Sequencer.tsx        # Multi-point spatial waypoint editor
 │   │   ├── MacroStudio.tsx      # Real-time recorder & timeline scrubber
-│   │   ├── PixelTrigger.tsx     # Color sampling & trigger automation
+│   │   ├── UpdateModal.tsx      # In-app updater modal & progress bar
 │   │   ├── MiniHud.tsx          # Compact floating glass widget (F8)
 │   │   ├── TelemetryGraph.tsx   # Canvas-based live CPS real-time chart
 │   │   └── PresetsModal.tsx     # Gamer preset library selector

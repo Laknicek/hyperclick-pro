@@ -147,10 +147,10 @@ export const MOCK_LATEST_RELEASE: UpdateReleaseInfo = {
 - **Ultra-High Frequency Mode**: Capable of sustained **10,000+ CPS** with zero CPU frame lock using high-precision Windows multimedia timer.
 - **Microsecond Precision**: Microsecond-level interval granularity for ultra-competitive gaming macros.
 
-#### 🧠 Neural Anti-Cheat Humanizer v2
-- **Dynamic Fatigue Curve**: Automatically ramps click variance realistically over continuous play sessions.
+#### 🧠 Organic Ergonomics & Rhythm Engine v2
+- **Dynamic Fatigue Curve**: Automatically ramps natural click variance over long sessions to reduce strain.
 - **Natural Bezier Curvature**: Multi-point waypoint transitions now glide using 4th-order cubic Bezier paths.
-- **Bimodal Reaction Time Jitter**: Mimics genuine human finger motor reflexes.
+- **Natural Reflex Jitter**: Mimics genuine human finger motor cadence for desktop accessibility.
 
 #### 🎨 Futuristic HUD & UI Overhaul
 - **Cyberpunk Mini HUD**: Detachable overlay with real-time CPS graph, telemetry counters, and click heatmaps.
