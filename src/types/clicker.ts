@@ -705,3 +705,163 @@ export const BUILT_IN_PROFILES: ProfilePreset[] = [
     },
   },
 ];
+
+/**
+ * Validates and sanitizes raw untrusted imported JSON into a compliant MacroSequence
+ */
+export function validateAndSanitizeMacroSequence(raw: unknown): { isValid: boolean; sequence: MacroSequence; errors: string[] } {
+  const errors: string[] = [];
+  const fallback = createDefaultMacroSequence();
+
+  if (!raw || typeof raw !== 'object') {
+    return { isValid: false, sequence: fallback, errors: ['Input is not a valid JSON object.'] };
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id : `seq_${Date.now()}`;
+  const name = typeof obj.name === 'string' && obj.name.trim() ? obj.name.slice(0, 100) : 'Imported Sequence';
+  const description = typeof obj.description === 'string' ? obj.description.slice(0, 500) : 'Imported Macro Sequence';
+
+  const validTraversalModes: SequenceTraversalMode[] = ['ordered', 'randomized', 'ping_pong', 'reverse'];
+  const traversalMode: SequenceTraversalMode = validTraversalModes.includes(obj.traversalMode as SequenceTraversalMode)
+    ? (obj.traversalMode as SequenceTraversalMode)
+    : 'ordered';
+
+  const loopCount = typeof obj.loopCount === 'number' && Number.isFinite(obj.loopCount)
+    ? Math.max(0, Math.min(999999, Math.round(obj.loopCount)))
+    : 0;
+
+  const speedMultiplier = typeof obj.speedMultiplier === 'number' && Number.isFinite(obj.speedMultiplier)
+    ? Math.max(0.1, Math.min(10.0, obj.speedMultiplier))
+    : 1.0;
+
+  const bezierSmoothness = typeof obj.bezierSmoothness === 'number' && Number.isFinite(obj.bezierSmoothness)
+    ? Math.max(0.0, Math.min(1.0, obj.bezierSmoothness))
+    : 0.65;
+
+  const humanizePaths = typeof obj.humanizePaths === 'boolean' ? obj.humanizePaths : true;
+
+  // Sanitize waypoints
+  const validActionTypes: WaypointActionType[] = [
+    'click',
+    'double_click',
+    'right_click',
+    'middle_click',
+    'move_only',
+    'drag_to',
+    'key_press',
+    'wait',
+    'wheel_scroll',
+    'pixel_check',
+  ];
+
+  const validButtons: MouseButton[] = ['left', 'right', 'middle', 'mouse4', 'mouse5'];
+  const validClickTypes: ClickType[] = ['single', 'double', 'triple', 'hold', 'burst'];
+
+  let sanitizedWaypoints: Waypoint[] = [];
+
+  if (Array.isArray(obj.waypoints) && obj.waypoints.length > 0) {
+    sanitizedWaypoints = obj.waypoints.map((w: unknown, idx: number) => {
+      const item = (w && typeof w === 'object' ? w : {}) as Record<string, unknown>;
+
+      const wpId = typeof item.id === 'string' && item.id.trim() ? item.id : `wp_${Date.now()}_${idx + 1}`;
+      const wpName = typeof item.name === 'string' && item.name.trim() ? item.name : `Waypoint ${idx + 1}`;
+
+      const x = typeof item.x === 'number' && Number.isFinite(item.x) ? Math.max(0, Math.min(7680, Math.round(item.x))) : 960;
+      const y = typeof item.y === 'number' && Number.isFinite(item.y) ? Math.max(0, Math.min(4320, Math.round(item.y))) : 540;
+
+      const actionType: WaypointActionType = validActionTypes.includes(item.actionType as WaypointActionType)
+        ? (item.actionType as WaypointActionType)
+        : 'click';
+
+      const mouseButton: MouseButton = validButtons.includes(item.mouseButton as MouseButton)
+        ? (item.mouseButton as MouseButton)
+        : 'left';
+
+      const clickType: ClickType = validClickTypes.includes(item.clickType as ClickType)
+        ? (item.clickType as ClickType)
+        : 'single';
+
+      const delayBeforeMs = typeof item.delayBeforeMs === 'number' && Number.isFinite(item.delayBeforeMs)
+        ? Math.max(0, Math.min(60000, Math.round(item.delayBeforeMs)))
+        : 100;
+
+      const delayAfterMs = typeof item.delayAfterMs === 'number' && Number.isFinite(item.delayAfterMs)
+        ? Math.max(0, Math.min(60000, Math.round(item.delayAfterMs)))
+        : 200;
+
+      const jitterRadius = typeof item.jitterRadius === 'number' && Number.isFinite(item.jitterRadius)
+        ? Math.max(0, Math.min(100, Math.round(item.jitterRadius)))
+        : 2;
+
+      const holdDurationMs = typeof item.holdDurationMs === 'number' && Number.isFinite(item.holdDurationMs)
+        ? Math.max(1, Math.min(10000, Math.round(item.holdDurationMs)))
+        : 35;
+
+      const loopRepeat = typeof item.loopRepeat === 'number' && Number.isFinite(item.loopRepeat)
+        ? Math.max(1, Math.min(1000, Math.round(item.loopRepeat)))
+        : 1;
+
+      const enabled = typeof item.enabled === 'boolean' ? item.enabled : true;
+
+      const sanitizedWp: Waypoint = {
+        id: wpId,
+        name: wpName,
+        x,
+        y,
+        actionType,
+        clickType,
+        mouseButton,
+        delayBeforeMs,
+        delayAfterMs,
+        jitterRadius,
+        holdDurationMs,
+        loopRepeat,
+        enabled,
+      };
+
+      if (typeof item.targetX === 'number' && Number.isFinite(item.targetX)) {
+        sanitizedWp.targetX = Math.max(0, Math.min(7680, Math.round(item.targetX)));
+      }
+      if (typeof item.targetY === 'number' && Number.isFinite(item.targetY)) {
+        sanitizedWp.targetY = Math.max(0, Math.min(4320, Math.round(item.targetY)));
+      }
+      if (typeof item.key === 'string') {
+        sanitizedWp.key = item.key.slice(0, 20);
+      }
+      if (typeof item.note === 'string') {
+        sanitizedWp.note = item.note.slice(0, 200);
+      }
+
+      return sanitizedWp;
+    });
+  } else {
+    errors.push('No valid waypoints array found. Default waypoints applied.');
+    sanitizedWaypoints = fallback.waypoints;
+  }
+
+  const sanitizedSequence: MacroSequence = {
+    id,
+    name,
+    description,
+    waypoints: sanitizedWaypoints,
+    loopCount,
+    traversalMode,
+    humanizePaths,
+    speedMultiplier,
+    bezierSmoothness,
+    totalDurationEstimatedMs: 0,
+    createdAt: typeof obj.createdAt === 'number' ? obj.createdAt : Date.now(),
+    updatedAt: Date.now(),
+    tags: Array.isArray(obj.tags) ? obj.tags.filter((t): t is string => typeof t === 'string').slice(0, 10) : ['Imported'],
+    hotkey: typeof obj.hotkey === 'string' ? obj.hotkey : undefined,
+  };
+
+  return {
+    isValid: errors.length === 0,
+    sequence: sanitizedSequence,
+    errors,
+  };
+}
+

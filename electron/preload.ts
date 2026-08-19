@@ -43,6 +43,12 @@ const electronAPI: IElectronAPI = {
   toggleMiniHud: (show?: boolean): Promise<boolean> =>
     ipcRenderer.invoke('mini-hud:toggle', show),
 
+  setAlwaysOnTop: (enabled: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('window:set-always-on-top', enabled),
+
+  isAlwaysOnTop: (): Promise<boolean> =>
+    ipcRenderer.invoke('window:is-always-on-top'),
+
   minimizeWindow: (): Promise<void> =>
     ipcRenderer.invoke('window:minimize'),
 
@@ -68,8 +74,14 @@ const electronAPI: IElectronAPI = {
   getVersion: (): Promise<string> =>
     ipcRenderer.invoke('app:get-version'),
 
-  checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; releaseNotes?: string }> =>
+  checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; releaseNotes?: string; downloadUrl?: string }> =>
     ipcRenderer.invoke('app:check-update'),
+
+  downloadUpdate: (options?: { packageType?: 'nsis' | 'portable' }): Promise<{ success: boolean; progress?: number; error?: string }> =>
+    ipcRenderer.invoke('app:download-update', options),
+
+  installAndRestart: (): Promise<void> =>
+    ipcRenderer.invoke('app:install-and-restart'),
 
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke('app:open-external', url),
@@ -107,6 +119,18 @@ const electronAPI: IElectronAPI = {
     const handler = (_event: IpcRendererEvent, visible: boolean) => callback(visible);
     ipcRenderer.on('mini-hud-state-changed', handler);
     return () => ipcRenderer.removeListener('mini-hud-state-changed', handler);
+  },
+
+  onAlwaysOnTopChanged: (callback: (enabled: boolean) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, enabled: boolean) => callback(enabled);
+    ipcRenderer.on('always-on-top-changed', handler);
+    return () => ipcRenderer.removeListener('always-on-top-changed', handler);
+  },
+
+  onUpdateDownloadProgress: (callback: (progress: { transferredBytes: number; totalBytes: number; percent: number; speedBytesPerSec: number }) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, progress: any) => callback(progress);
+    ipcRenderer.on('update-download-progress', handler);
+    return () => ipcRenderer.removeListener('update-download-progress', handler);
   },
 };
 

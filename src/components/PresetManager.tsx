@@ -57,6 +57,8 @@ export const PresetManager: React.FC<PresetManagerProps> = ({
       case 'Crosshair': return Crosshair;
       case 'Cookie': return Cookie;
       case 'Zap': return Zap;
+      case 'Flame': return Flame;
+      case 'ShieldCheck': return ShieldCheck;
       default: return Layers;
     }
   };

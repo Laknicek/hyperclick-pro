@@ -1,3 +1,5 @@
+import type { SoundProfileId } from './sound';
+
 export type MouseButton = 'left' | 'right' | 'middle' | 'x1' | 'x2';
 export type ClickType = 'single' | 'double' | 'triple' | 'hold' | 'burst';
 export type RepeatMode = 'infinite' | 'count' | 'duration';
@@ -129,7 +131,7 @@ export interface AppSettings {
   accentColor: ThemeAccent;
   soundEffects: boolean;
   soundVolume: number; // 0 to 1
-  audioTheme: 'mechanical' | 'laser' | 'subtle' | 'synth';
+  audioTheme: 'mechanical' | 'laser' | 'subtle' | 'synth' | SoundProfileId;
   alwaysOnTop: boolean;
   minimizeToTray: boolean;
   startMinimized: boolean;

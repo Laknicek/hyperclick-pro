@@ -1,24 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Crosshair,
-  Plus,
-  Trash2,
   Play,
   Square,
-  Pause,
-  Eye,
-  EyeOff,
-  Move,
-  Clock,
-  MousePointer,
-  Maximize,
   Sparkles,
-  Layers,
-  Settings2,
-  Check,
+  Maximize,
   X,
   Target,
-  Zap,
+  Layers,
+  MousePointer,
+  Clock,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Waypoint, WaypointRoute, ClickActionType, OverlayState } from '../types/waypoint';
 import { soundEngine } from '../services/soundEngine';
@@ -48,7 +41,7 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
   onClose,
   className = '',
 }) => {
-  // Default route if none provided
+  // Default fallback route
   const [internalWaypoints, setInternalWaypoints] = useState<Waypoint[]>([
     { id: 'wp-1', index: 1, x: 380, y: 260, action: 'left', delayMs: 150, label: 'Boss Head' },
     { id: 'wp-2', index: 2, x: 820, y: 340, action: 'left', delayMs: 100, label: 'Item Chest' },
@@ -58,7 +51,7 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
 
   const waypoints = externalRoute?.waypoints || internalWaypoints;
 
-  // Overlay interaction state
+  // Overlay interaction & view state
   const [overlayState, setOverlayState] = useState<OverlayState>({
     isVisible: true,
     isPickingCoordinates: false,
@@ -77,6 +70,30 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
   const [draggedWaypointId, setDraggedWaypointId] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<ClickActionType>('left');
   const [selectedDelay, setSelectedDelay] = useState<number>(100);
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+    height: typeof window !== 'undefined' ? window.innerHeight : 1080,
+  });
+
+  // Track Window Resize for Coordinate Scaling
+  useEffect(() => {
+    const handleResize = () => {
+      setViewportSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Sync Click-Through state with Electron IPC if available
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).electron?.setIgnoreMouseEvents) {
+      // In non-interactive mode, allow mouse events to pass through to underlying games/apps
+      (window as any).electron.setIgnoreMouseEvents(!overlayState.isInteractive, { forward: true });
+    }
+  }, [overlayState.isInteractive]);
 
   // Track real-time mouse movement for crosshair and coordinate loupe
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -119,7 +136,6 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
         ]);
       }
 
-      // Exit coordinate picking or stay depending on workflow
       setOverlayState((prev) => ({ ...prev, isPickingCoordinates: false }));
     }
   };
@@ -209,8 +225,8 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
           : 'pointer-events-none bg-transparent'
       } ${className}`}
     >
-      {/* Top Floating Control Bar (Interactive only) */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-center gap-2 bg-card/90 border border-white/15 px-4 py-2 rounded-2xl shadow-2xl backdrop-blur-2xl text-slate-100">
+      {/* Top Floating Control Bar (Always keeps pointer-events-auto for user interaction) */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-center gap-2 bg-card/95 border border-white/15 px-4 py-2 rounded-2xl shadow-[0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-2xl text-slate-100 ring-1 ring-white/10">
         <div className="flex items-center gap-2 pr-3 border-r border-white/10">
           <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
             <Target className="w-4 h-4" />
@@ -218,10 +234,13 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
           <div>
             <h1 className="text-xs font-black tracking-wider uppercase flex items-center gap-1.5">
               Waypoint HUD
-              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300">
+              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold">
                 {waypoints.length} TARGETS
               </span>
             </h1>
+            <span className="text-[9px] text-slate-400 font-mono">
+              {viewportSize.width}×{viewportSize.height}
+            </span>
           </div>
         </div>
 
@@ -243,7 +262,7 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
             }`}
           >
             <Crosshair className="w-3.5 h-3.5" />
-            {overlayState.isPickingCoordinates ? 'Click to Set Point' : 'Pick Target'}
+            {overlayState.isPickingCoordinates ? 'Click Target on Screen' : 'Pick Target'}
           </button>
 
           {/* Execution Toggle */}
@@ -273,7 +292,7 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
           </button>
         </div>
 
-        {/* View Toggles */}
+        {/* View & Click-Through Toggles */}
         <div className="flex items-center gap-1 pl-2 border-l border-white/10">
           <button
             type="button"
@@ -295,7 +314,7 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
             onClick={() =>
               setOverlayState((prev) => ({ ...prev, showLoupeMagnifier: !prev.showLoupeMagnifier }))
             }
-            title="Toggle Coordinate Loupe"
+            title="Toggle Precision Coordinate Loupe"
             className={`p-1.5 rounded-lg transition-colors ${
               overlayState.showLoupeMagnifier
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
@@ -307,16 +326,19 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
 
           <button
             type="button"
-            onClick={() =>
-              setOverlayState((prev) => ({ ...prev, isInteractive: !prev.isInteractive }))
-            }
-            title={overlayState.isInteractive ? 'Switch to Click-Through' : 'Switch to Edit Mode'}
-            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-colors ${
+            onClick={() => {
+              const nextState = !overlayState.isInteractive;
+              setOverlayState((prev) => ({ ...prev, isInteractive: nextState }));
+              soundEngine.playClick('tech-pulse');
+            }}
+            title={overlayState.isInteractive ? 'Switch to Click-Through Transparent Mode' : 'Switch to Interactive Edit Mode'}
+            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold transition-all flex items-center gap-1 ${
               overlayState.isInteractive
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                : 'bg-slate-800 text-slate-400'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse'
             }`}
           >
+            {overlayState.isInteractive ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
             {overlayState.isInteractive ? 'EDIT MODE' : 'CLICK-THROUGH'}
           </button>
 
@@ -362,7 +384,7 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
 
         {overlayState.showBezierCurves && bezierPathData && (
           <>
-            {/* Ambient Background Blur Glow */}
+            {/* Ambient Background Glow */}
             <path
               d={bezierPathData}
               fill="none"
@@ -384,7 +406,6 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
               strokeLinecap="round"
               strokeLinejoin="round"
               filter="url(#neonGlow)"
-              className="animate-[dash_1.5s_linear_infinite]"
             />
           </>
         )}
@@ -419,7 +440,7 @@ export const WaypointOverlay: React.FC<WaypointOverlayProps> = ({
                 />
               )}
 
-              {/* Glowing Outer Hex / Circle Reticle */}
+              {/* Glowing Reticle */}
               <div
                 className={`w-10 h-10 rounded-full flex items-center justify-center font-mono font-black text-sm text-slate-950 border-2 shadow-2xl transition-all ${
                   isActive

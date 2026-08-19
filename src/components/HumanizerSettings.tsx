@@ -10,7 +10,9 @@ import {
   Coffee, 
   EyeOff, 
   Fingerprint,
-  Info
+  Info,
+  SlidersHorizontal,
+  Zap
 } from 'lucide-react';
 import { HumanizerConfig, DistributionType } from '../types';
 import { playClickSound } from '../utils/audio';
@@ -33,12 +35,17 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
     onChangeConfig({ enabled: !config.enabled });
   };
 
+  const safeJitterRadius = Math.max(0, Math.min(30, config.jitterRadius || 0));
+  const safeTimingVariance = Math.max(0, Math.min(50, config.timingVariancePercent || 0));
+  const safeBezierCurvature = Math.max(1, Math.min(10, config.bezierCurvature || 4));
+  const safeFatigueDecay = Math.max(1, Math.min(10, config.fatigueDecayRate || 2));
+
   // Render SVG Gaussian Curve Visualizer
   const renderGaussianSvg = () => {
     const width = 280;
     const height = 70;
     const mean = width / 2;
-    const variance = (config.timingVariancePercent / 50) * 35 + 15;
+    const variance = (safeTimingVariance / 50) * 35 + 15;
     
     let pathD = `M 0,${height}`;
     for (let x = 0; x <= width; x += 3) {
@@ -79,7 +86,7 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
             <line x1={mean} y1="0" x2={mean} y2={height} stroke="rgba(255,255,255,0.2)" strokeDasharray="3 3" />
           </svg>
           <div className="absolute bottom-1 right-2 text-[9px] font-mono text-slate-500">
-            ±{(config.timingVariancePercent * 0.8).toFixed(1)}ms Variance
+            ±{(safeTimingVariance * 0.8).toFixed(1)}ms Variance
           </div>
         </div>
       </div>
@@ -142,7 +149,7 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
                 Cursor Positional Jitter
               </span>
               <span className="font-mono text-cyan-400 font-bold px-2 py-0.5 bg-cyan-500/10 rounded-md">
-                {config.jitterRadius} px
+                {safeJitterRadius} px
               </span>
             </div>
             <input
@@ -150,8 +157,11 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
               min="0"
               max="25"
               step="1"
-              value={config.jitterRadius}
-              onChange={(e) => onChangeConfig({ jitterRadius: parseInt(e.target.value, 10) })}
+              value={safeJitterRadius}
+              onChange={(e) => {
+                const val = Math.max(0, Math.min(25, parseInt(e.target.value, 10) || 0));
+                onChangeConfig({ jitterRadius: val });
+              }}
               className="neon-slider"
             />
             <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
@@ -169,7 +179,7 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
                 Timing Variance (Rhythm Fluctuation)
               </span>
               <span className="font-mono text-purple-400 font-bold px-2 py-0.5 bg-purple-500/10 rounded-md">
-                ±{config.timingVariancePercent}%
+                ±{safeTimingVariance}%
               </span>
             </div>
             <input
@@ -177,8 +187,11 @@ export const HumanizerSettings: React.FC<HumanizerSettingsProps> = ({
               min="0"
               max="50"
               step="1"
-              value={config.timingVariancePercent}
-              onChange={(e) => onChangeConfig({ timingVariancePercent: parseInt(e.target.value, 10) })}
+              value={safeTimingVariance}
+              onChange={(e) => {
+                const val = Math.max(0, Math.min(50, parseInt(e.target.value, 10) || 0));
+                onChangeConfig({ timingVariancePercent: val });
+              }}
               className="neon-slider"
             />
             <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">

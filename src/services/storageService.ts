@@ -11,7 +11,7 @@ import {
 import { BUILTIN_PRESETS, createCustomProfileFromPreset } from './presetLibrary';
 
 /**
- * Storage keys
+ * Storage keys for browser localStorage persistence
  */
 const STORAGE_KEYS = {
   SETTINGS: 'hyperclick_app_settings_v1',
@@ -73,156 +73,185 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 };
 
 /**
- * Validates whether an object conforms to PresetProfile schema
+ * Validates whether an object conforms to PresetProfile schema.
+ * Features automated error recovery, schema repair, and normalization.
  */
 export function validateProfileSchema(obj: unknown): ValidationResult<PresetProfile> {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   if (!obj || typeof obj !== 'object') {
-    return { isValid: false, errors: ['Profile payload must be a non-null JSON object.'], warnings: [] };
+    return {
+      isValid: false,
+      errors: ['Profile payload must be a non-null JSON object.'],
+      warnings: [],
+    };
   }
 
-  const p = obj as Record<string, unknown>;
+  const p = obj as Record<string, any>;
 
-  // Required basic string properties
-  if (typeof p.id !== 'string' || !p.id.trim()) {
-    errors.push('Profile missing or invalid "id".');
-  }
-  if (typeof p.name !== 'string' || !p.name.trim()) {
-    errors.push('Profile missing or invalid "name".');
-  }
-  if (typeof p.description !== 'string') {
-    warnings.push('Profile description should be a string.');
+  // ID validation & recovery
+  let id = typeof p.id === 'string' && p.id.trim() ? p.id.trim() : '';
+  if (!id) {
+    id = `profile-recovered-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    warnings.push('Profile missing "id". Auto-generated fresh unique ID.');
   }
 
-  // CPS & Interval
-  if (typeof p.cps !== 'number' || isNaN(p.cps) || p.cps <= 0) {
-    errors.push('Profile "cps" must be a positive number.');
-  }
-  if (typeof p.intervalMs !== 'number' || isNaN(p.intervalMs) || p.intervalMs <= 0) {
-    errors.push('Profile "intervalMs" must be a positive number.');
+  // Name validation & recovery
+  let name = typeof p.name === 'string' && p.name.trim() ? p.name.trim() : '';
+  if (!name) {
+    name = 'Recovered Custom Profile';
+    warnings.push('Profile missing "name". Defaulted to "Recovered Custom Profile".');
   }
 
-  // Button enum
+  const description = typeof p.description === 'string' ? p.description : '';
+  const icon = typeof p.icon === 'string' && p.icon ? p.icon : 'Zap';
+  const tags = Array.isArray(p.tags) ? p.tags.map(String) : ['Custom'];
+
+  // CPS & Interval normalization
+  let cps = Number(p.cps);
+  let intervalMs = Number(p.intervalMs);
+
+  if (isNaN(cps) || cps <= 0) {
+    if (!isNaN(intervalMs) && intervalMs > 0) {
+      cps = Math.max(0.01, +(1000 / intervalMs).toFixed(2));
+      warnings.push(`Inferred CPS (${cps}) from intervalMs (${intervalMs}ms).`);
+    } else {
+      cps = 10;
+      intervalMs = 100;
+      warnings.push('Missing CPS and intervalMs. Defaulted to 10 CPS (100ms).');
+    }
+  }
+
+  if (isNaN(intervalMs) || intervalMs <= 0) {
+    intervalMs = Math.max(1, Math.round(1000 / cps));
+  }
+
+  // Button enum validation
   const validButtons: ClickButton[] = ['left', 'right', 'middle', 'mouse4', 'mouse5'];
-  if (!validButtons.includes(p.button as ClickButton)) {
-    errors.push(`Invalid mouse button "${p.button}". Expected: ${validButtons.join(', ')}`);
+  let button: ClickButton = 'left';
+  if (typeof p.button === 'string') {
+    const norm = p.button.toLowerCase() as ClickButton;
+    if (validButtons.includes(norm)) {
+      button = norm;
+    } else {
+      warnings.push(`Unrecognized mouse button "${p.button}". Defaulted to "left".`);
+    }
   }
 
-  // ClickType enum
+  // ClickType enum validation
   const validClickTypes: ClickType[] = ['single', 'double', 'triple', 'hold', 'burst', 'sequence'];
-  if (!validClickTypes.includes(p.clickType as ClickType)) {
-    errors.push(`Invalid click type "${p.clickType}". Expected: ${validClickTypes.join(', ')}`);
+  let clickType: ClickType = 'single';
+  if (typeof p.clickType === 'string') {
+    const norm = p.clickType.toLowerCase() as ClickType;
+    if (validClickTypes.includes(norm)) {
+      clickType = norm;
+    } else {
+      warnings.push(`Unrecognized click type "${p.clickType}". Defaulted to "single".`);
+    }
   }
 
-  // TriggerMode enum
+  // TriggerMode validation
   const validTriggerModes: TriggerMode[] = ['toggle', 'hold', 'repeat_n_times', 'duration_timer'];
-  if (!validTriggerModes.includes(p.triggerMode as TriggerMode)) {
-    warnings.push(`Unrecognized trigger mode "${p.triggerMode}". Falling back to "toggle".`);
+  let triggerMode: TriggerMode = 'toggle';
+  if (typeof p.triggerMode === 'string') {
+    const norm = p.triggerMode.toLowerCase() as TriggerMode;
+    if (validTriggerModes.includes(norm)) {
+      triggerMode = norm;
+    }
   }
 
   // Hotkey
-  if (typeof p.hotkey !== 'string') {
-    warnings.push('Profile hotkey missing; defaulting to "F6".');
-  }
+  const hotkey = typeof p.hotkey === 'string' && p.hotkey.trim() ? p.hotkey.trim() : 'F6';
 
-  // Humanizer check
-  if (!p.humanizer || typeof p.humanizer !== 'object') {
-    errors.push('Profile missing "humanizer" configuration.');
-  } else {
-    const h = p.humanizer as Record<string, unknown>;
-    const validAlgos: HumanizerAlgorithm[] = [
-      'off',
-      'gaussian',
-      'uniform',
-      'fatigue',
-      'jitter_god',
-      'butterfly',
-      'bimodal',
-      'stealth_human',
-    ];
-    if (typeof h.enabled !== 'boolean') {
-      errors.push('humanizer.enabled must be boolean.');
-    }
-    if (!validAlgos.includes(h.algorithm as HumanizerAlgorithm)) {
-      warnings.push(`Unknown humanizer algorithm "${h.algorithm}".`);
-    }
-  }
+  // Humanizer config validation and repair
+  const rawHumanizer = p.humanizer && typeof p.humanizer === 'object' ? p.humanizer : {};
+  const validAlgos: HumanizerAlgorithm[] = [
+    'off',
+    'gaussian',
+    'uniform',
+    'fatigue',
+    'jitter_god',
+    'butterfly',
+    'bimodal',
+    'stealth_human',
+  ];
+  const humanizerAlgo: HumanizerAlgorithm = validAlgos.includes(rawHumanizer.algorithm)
+    ? rawHumanizer.algorithm
+    : 'off';
 
-  // Burst check
-  if (!p.burst || typeof p.burst !== 'object') {
-    errors.push('Profile missing "burst" configuration.');
-  }
+  const humanizer = {
+    enabled: Boolean(rawHumanizer.enabled),
+    algorithm: humanizerAlgo,
+    jitterMs: Number(rawHumanizer.jitterMs) || 0,
+    minIntervalMs: typeof rawHumanizer.minIntervalMs === 'number' ? rawHumanizer.minIntervalMs : undefined,
+    maxIntervalMs: typeof rawHumanizer.maxIntervalMs === 'number' ? rawHumanizer.maxIntervalMs : undefined,
+    fatigueFactor: Number(rawHumanizer.fatigueFactor) || 0,
+    microPauses: Boolean(rawHumanizer.microPauses),
+    microPauseProbability: Number(rawHumanizer.microPauseProbability) || 0.05,
+    microPauseMinMs: Number(rawHumanizer.microPauseMinMs) || 50,
+    microPauseMaxMs: Number(rawHumanizer.microPauseMaxMs) || 150,
+    cursorJitter: Boolean(rawHumanizer.cursorJitter),
+    cursorJitterRadiusPx: Number(rawHumanizer.cursorJitterRadiusPx) || 1.5,
+    bimodalSpreadRatio: typeof rawHumanizer.bimodalSpreadRatio === 'number' ? rawHumanizer.bimodalSpreadRatio : undefined,
+  };
 
-  // Location check
-  if (!p.location || typeof p.location !== 'object') {
-    errors.push('Profile missing "location" configuration.');
-  }
+  // Burst config validation
+  const rawBurst = p.burst && typeof p.burst === 'object' ? p.burst : {};
+  const burst = {
+    enabled: Boolean(rawBurst.enabled),
+    clicksPerBurst: Number(rawBurst.clicksPerBurst) || 3,
+    burstCps: Number(rawBurst.burstCps) || 12,
+    cooldownMs: Number(rawBurst.cooldownMs) || 200,
+    randomizeBurstCount: Boolean(rawBurst.randomizeBurstCount),
+  };
 
-  if (errors.length > 0) {
-    return { isValid: false, errors, warnings };
-  }
+  // Location config validation
+  const rawLocation = p.location && typeof p.location === 'object' ? p.location : {};
+  const location = {
+    mode: rawLocation.mode || 'current_cursor',
+    fixedCoords: rawLocation.fixedCoords || { x: 0, y: 0 },
+    multiPoints: Array.isArray(rawLocation.multiPoints) ? rawLocation.multiPoints : [],
+    randomArea: rawLocation.randomArea || { x1: 0, y1: 0, x2: 0, y2: 0 },
+    restoreCursorPositionAfterClick: Boolean(rawLocation.restoreCursorPositionAfterClick),
+  };
 
-  // Sanitize and complete optional fields
+  // Anti-detection config validation
+  const rawAnti = p.antiDetection && typeof p.antiDetection === 'object' ? p.antiDetection : {};
+  const antiDetection = {
+    enabled: Boolean(rawAnti.enabled),
+    noiseInjection: Boolean(rawAnti.noiseInjection),
+    entropyMultiplier: Number(rawAnti.entropyMultiplier) || 1.0,
+    blockBlacklistedWindows: Boolean(rawAnti.blockBlacklistedWindows),
+    simulatedHardwareEvents: rawAnti.simulatedHardwareEvents !== false,
+  };
+
   const sanitized: PresetProfile = {
-    id: String(p.id),
-    name: String(p.name).trim(),
+    id,
+    name,
     category: (p.category as any) || 'custom',
-    description: typeof p.description === 'string' ? p.description : '',
-    icon: typeof p.icon === 'string' ? p.icon : 'Zap',
-    tags: Array.isArray(p.tags) ? p.tags.map(String) : [],
-    cps: Number(p.cps),
+    description,
+    icon,
+    tags,
+    cps,
     targetCpsRange: Array.isArray(p.targetCpsRange)
-      ? [Number(p.targetCpsRange[0]) || Number(p.cps), Number(p.targetCpsRange[1]) || Number(p.cps)]
+      ? [Number(p.targetCpsRange[0]) || cps, Number(p.targetCpsRange[1]) || cps]
       : undefined,
-    intervalMs: Number(p.intervalMs),
+    intervalMs,
     intervalRangeMs: Array.isArray(p.intervalRangeMs)
-      ? [Number(p.intervalRangeMs[0]) || Number(p.intervalMs), Number(p.intervalRangeMs[1]) || Number(p.intervalMs)]
+      ? [Number(p.intervalRangeMs[0]) || intervalMs, Number(p.intervalRangeMs[1]) || intervalMs]
       : undefined,
-    button: p.button as ClickButton,
-    clickType: p.clickType as ClickType,
-    triggerMode: (p.triggerMode as TriggerMode) || 'toggle',
+    button,
+    clickType,
+    triggerMode,
     repeatCount: typeof p.repeatCount === 'number' ? p.repeatCount : undefined,
     durationSeconds: typeof p.durationSeconds === 'number' ? p.durationSeconds : undefined,
-    hotkey: typeof p.hotkey === 'string' && p.hotkey ? p.hotkey : 'F6',
-    burst: {
-      enabled: Boolean((p.burst as any)?.enabled),
-      clicksPerBurst: Number((p.burst as any)?.clicksPerBurst) || 3,
-      burstCps: Number((p.burst as any)?.burstCps) || 12,
-      cooldownMs: Number((p.burst as any)?.cooldownMs) || 200,
-      randomizeBurstCount: Boolean((p.burst as any)?.randomizeBurstCount),
-    },
-    humanizer: {
-      enabled: Boolean((p.humanizer as any)?.enabled),
-      algorithm: ((p.humanizer as any)?.algorithm as HumanizerAlgorithm) || 'off',
-      jitterMs: Number((p.humanizer as any)?.jitterMs) || 0,
-      minIntervalMs: typeof (p.humanizer as any)?.minIntervalMs === 'number' ? (p.humanizer as any).minIntervalMs : undefined,
-      maxIntervalMs: typeof (p.humanizer as any)?.maxIntervalMs === 'number' ? (p.humanizer as any).maxIntervalMs : undefined,
-      fatigueFactor: Number((p.humanizer as any)?.fatigueFactor) || 0,
-      microPauses: Boolean((p.humanizer as any)?.microPauses),
-      microPauseProbability: Number((p.humanizer as any)?.microPauseProbability) || 0.05,
-      microPauseMinMs: Number((p.humanizer as any)?.microPauseMinMs) || 50,
-      microPauseMaxMs: Number((p.humanizer as any)?.microPauseMaxMs) || 150,
-      cursorJitter: Boolean((p.humanizer as any)?.cursorJitter),
-      cursorJitterRadiusPx: Number((p.humanizer as any)?.cursorJitterRadiusPx) || 1.5,
-      bimodalSpreadRatio: typeof (p.humanizer as any)?.bimodalSpreadRatio === 'number' ? (p.humanizer as any).bimodalSpreadRatio : undefined,
-    },
-    location: {
-      mode: ((p.location as any)?.mode) || 'current_cursor',
-      fixedCoords: (p.location as any)?.fixedCoords || { x: 0, y: 0 },
-      multiPoints: Array.isArray((p.location as any)?.multiPoints) ? (p.location as any).multiPoints : [],
-      randomArea: (p.location as any)?.randomArea || { x1: 0, y1: 0, x2: 0, y2: 0 },
-      restoreCursorPositionAfterClick: Boolean((p.location as any)?.restoreCursorPositionAfterClick),
-    },
-    sequence: Array.isArray(p.sequence) ? (p.sequence as any) : undefined,
-    antiDetection: {
-      enabled: Boolean((p.antiDetection as any)?.enabled),
-      noiseInjection: Boolean((p.antiDetection as any)?.noiseInjection),
-      entropyMultiplier: Number((p.antiDetection as any)?.entropyMultiplier) || 1.0,
-      blockBlacklistedWindows: Boolean((p.antiDetection as any)?.blockBlacklistedWindows),
-      simulatedHardwareEvents: (p.antiDetection as any)?.simulatedHardwareEvents !== false,
-    },
+    hotkey,
+    burst,
+    humanizer,
+    location,
+    sequence: Array.isArray(p.sequence) ? p.sequence : undefined,
+    antiDetection,
     isBuiltIn: Boolean(p.isBuiltIn),
     isFavorite: Boolean(p.isFavorite),
     createdAt: typeof p.createdAt === 'string' ? p.createdAt : new Date().toISOString(),
@@ -234,15 +263,26 @@ export function validateProfileSchema(obj: unknown): ValidationResult<PresetProf
   return {
     isValid: true,
     data: sanitized,
-    errors: [],
+    errors,
     warnings,
   };
 }
 
 /**
- * Storage Engine Class
+ * Storage Service Manager
  */
 class StorageService {
+  /**
+   * Safe Electron IPC bridge accessor
+   */
+  private getElectronAPI() {
+    if (typeof window !== 'undefined') {
+      if ((window as any).electronAPI) return (window as any).electronAPI;
+      if ((window as any).electron) return (window as any).electron;
+    }
+    return null;
+  }
+
   /**
    * Loads global application settings with complete fallback
    */
@@ -269,7 +309,7 @@ class StorageService {
   }
 
   /**
-   * Saves global application settings
+   * Saves global application settings to LocalStorage and Electron
    */
   public saveSettings(settings: Partial<AppSettings>): AppSettings {
     try {
@@ -285,6 +325,20 @@ class StorageService {
         lastUpdated: new Date().toISOString(),
       };
       localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(merged));
+
+      // Sync with Electron if available
+      const electron = this.getElectronAPI();
+      if (electron?.saveSettings) {
+        electron.saveSettings(merged).catch((err: any) => {
+          console.warn('[StorageService] Electron saveSettings non-fatal error:', err);
+        });
+      }
+
+      // Notify window listeners
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hyperclick_settings_updated', { detail: merged }));
+      }
+
       return merged;
     } catch (e) {
       console.error('[StorageService] Error saving settings to localStorage:', e);
@@ -337,6 +391,9 @@ class StorageService {
   private saveCustomProfiles(profiles: PresetProfile[]): void {
     try {
       localStorage.setItem(STORAGE_KEYS.CUSTOM_PROFILES, JSON.stringify(profiles));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hyperclick_profiles_updated', { detail: profiles }));
+      }
     } catch (e) {
       console.error('[StorageService] Error saving custom profiles:', e);
     }
@@ -348,7 +405,13 @@ class StorageService {
   public getFavoriteIds(): string[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.FAVORITES);
-      return raw ? JSON.parse(raw) : ['builtin-minecraft-jitter-god', 'builtin-minecraft-butterfly', 'builtin-stealth-natural-human'];
+      return raw
+        ? JSON.parse(raw)
+        : [
+            'builtin-minecraft-jitter-god',
+            'builtin-minecraft-butterfly',
+            'builtin-stealth-natural-human',
+          ];
     } catch {
       return [];
     }
@@ -400,7 +463,7 @@ class StorageService {
   public createProfile(base?: Partial<PresetProfile>): PresetProfile {
     const now = new Date().toISOString();
     const id = `profile-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    
+
     const newProfile: PresetProfile = {
       id,
       name: base?.name || 'New Custom Profile',
@@ -466,7 +529,7 @@ class StorageService {
   }
 
   /**
-   * Saves or updates a profile. If it's a built-in profile, it will clone it to a custom profile.
+   * Saves or updates a profile. If it's a built-in profile, clones it to a custom profile.
    */
   public saveProfile(profile: PresetProfile): PresetProfile {
     const customProfiles = this.getCustomProfiles();
@@ -481,7 +544,6 @@ class StorageService {
     if (existingIndex >= 0) {
       customProfiles[existingIndex] = updatedProfile;
     } else {
-      // If it's a built-in or new, give it a custom ID if modifying built-in
       if (profile.isBuiltIn) {
         return this.cloneProfile(profile.id, `${profile.name} (Custom)`);
       }
@@ -512,7 +574,7 @@ class StorageService {
   public cloneProfile(id: string, customName?: string): PresetProfile {
     const source = this.getProfileById(id) || BUILTIN_PRESETS[0];
     const cloned = createCustomProfileFromPreset(source, customName);
-    
+
     const customProfiles = this.getCustomProfiles();
     customProfiles.push(cloned);
     this.saveCustomProfiles(customProfiles);
@@ -525,7 +587,7 @@ class StorageService {
   public deleteProfile(id: string): boolean {
     const customProfiles = this.getCustomProfiles();
     const filtered = customProfiles.filter((p) => p.id !== id);
-    
+
     if (filtered.length === customProfiles.length) {
       return false; // Not found or was built-in
     }
@@ -607,9 +669,12 @@ class StorageService {
   /**
    * Serializes profile(s) into a JSON export string
    */
-  public exportProfileToJson(profiles: PresetProfile | PresetProfile[], includeAppSettings = false): string {
+  public exportProfileToJson(
+    profiles: PresetProfile | PresetProfile[],
+    includeAppSettings = false
+  ): string {
     const profileList = Array.isArray(profiles) ? profiles : [profiles];
-    
+
     const bundle: ProfileExportBundle = {
       format: 'hyperclick-pro-profile-bundle',
       schemaVersion: '1.0.0',
@@ -629,14 +694,14 @@ class StorageService {
     filename?: string
   ): Promise<void> {
     const list = Array.isArray(profiles) ? profiles : [profiles];
-    const defaultName = list.length === 1 
-      ? `hyperclick-${list[0].name.toLowerCase().replace(/[^a-z0-9]/g, '-')}.json`
-      : `hyperclick-profiles-bundle-${Date.now()}.json`;
+    const defaultName =
+      list.length === 1
+        ? `hyperclick-${list[0].name.toLowerCase().replace(/[^a-z0-9]/g, '-')}.json`
+        : `hyperclick-profiles-bundle-${Date.now()}.json`;
 
     const finalName = filename || defaultName;
     const jsonString = this.exportProfileToJson(list);
 
-    // Browser / Electron fallback
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -649,7 +714,7 @@ class StorageService {
   }
 
   /**
-   * Parses JSON string and imports profiles with validation
+   * Parses JSON string and imports profiles with schema validation and repair
    */
   public importProfilesFromJson(jsonString: string): {
     success: boolean;
@@ -673,13 +738,12 @@ class StorageService {
       };
     }
 
-    // Determine if parsed is single profile, array of profiles, or bundle
     let candidates: any[] = [];
     if (parsed && typeof parsed === 'object') {
       if (parsed.format === 'hyperclick-pro-profile-bundle' && Array.isArray(parsed.profiles)) {
         candidates = parsed.profiles;
         if (parsed.appSettings) {
-          warnings.push('Bundle contains app settings. Apply them via Settings > Restore Backup if desired.');
+          warnings.push('Bundle contains app settings. Apply them via Settings > Restore Backup.');
         }
       } else if (Array.isArray(parsed)) {
         candidates = parsed;
@@ -690,30 +754,35 @@ class StorageService {
       return {
         success: false,
         imported: [],
-        errors: ['Imported file is neither a valid profile object nor a profile bundle array.'],
+        errors: ['Imported content is neither a valid profile object nor a bundle array.'],
         warnings: [],
       };
     }
 
     const existingCustom = this.getCustomProfiles();
-    const existingIds = new Set([...BUILTIN_PRESETS.map((p) => p.id), ...existingCustom.map((p) => p.id)]);
+    const existingIds = new Set([
+      ...BUILTIN_PRESETS.map((p) => p.id),
+      ...existingCustom.map((p) => p.id),
+    ]);
 
     for (let i = 0; i < candidates.length; i++) {
       const item = candidates[i];
       const validation = validateProfileSchema(item);
-      
+
       if (!validation.isValid || !validation.data) {
-        errors.push(`Item #${i + 1} ("${item?.name || 'Unnamed'}") validation failed: ${validation.errors.join('; ')}`);
+        errors.push(
+          `Item #${i + 1} ("${item?.name || 'Unnamed'}"): ${validation.errors.join('; ')}`
+        );
         continue;
       }
 
       if (validation.warnings.length > 0) {
-        warnings.push(`Item #${i + 1} warnings: ${validation.warnings.join('; ')}`);
+        warnings.push(`Item #${i + 1} (${validation.data.name}): ${validation.warnings.join('; ')}`);
       }
 
       const profile = validation.data;
 
-      // Handle ID collision or imported built-in profiles
+      // Resolve ID collisions or imported built-ins
       if (existingIds.has(profile.id) || profile.isBuiltIn) {
         profile.id = `profile-imported-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         profile.name = `${profile.name} (Imported)`;
@@ -827,7 +896,6 @@ export const storageService = new StorageService();
 
 /**
  * High-performance Web Audio API Synthetic Click Sound Generator
- * Generates instant crisp switch sounds without requiring external asset files!
  */
 export class SoundSynthesizer {
   private ctx: AudioContext | null = null;
@@ -856,11 +924,10 @@ export class SoundSynthesizer {
 
       const now = this.ctx.currentTime;
       const masterVol = (volumePercent / 100) * 0.35;
-      const pitchOffset = variance ? (Math.random() * 0.16 - 0.08) : 0;
+      const pitchOffset = variance ? Math.random() * 0.16 - 0.08 : 0;
 
       switch (pack) {
         case 'mechanical-blue': {
-          // Sharp dual-click clicky switch
           const osc1 = this.ctx.createOscillator();
           const gain1 = this.ctx.createGain();
           osc1.type = 'triangle';
@@ -878,7 +945,6 @@ export class SoundSynthesizer {
         }
 
         case 'mechanical-brown': {
-          // Tactile bump thud
           const osc = this.ctx.createOscillator();
           const gain = this.ctx.createGain();
           osc.type = 'sine';
@@ -896,7 +962,6 @@ export class SoundSynthesizer {
         }
 
         case 'soft-membrane': {
-          // Dampened soft click
           const osc = this.ctx.createOscillator();
           const gain = this.ctx.createGain();
           osc.type = 'sine';
@@ -914,7 +979,6 @@ export class SoundSynthesizer {
         }
 
         case 'bubble-pop': {
-          // Fun bubbly pop
           const osc = this.ctx.createOscillator();
           const gain = this.ctx.createGain();
           osc.type = 'sine';
@@ -932,7 +996,6 @@ export class SoundSynthesizer {
         }
 
         case 'futuristic-laser': {
-          // Sci-fi high tech pulse
           const osc = this.ctx.createOscillator();
           const gain = this.ctx.createGain();
           osc.type = 'sawtooth';
@@ -951,7 +1014,6 @@ export class SoundSynthesizer {
 
         case 'subtle-tick':
         default: {
-          // Crisp micro-tick
           const osc = this.ctx.createOscillator();
           const gain = this.ctx.createGain();
           osc.type = 'square';
@@ -968,7 +1030,7 @@ export class SoundSynthesizer {
           break;
         }
       }
-    } catch (e) {
+    } catch {
       // Audio error suppressed silently
     }
   }
@@ -986,11 +1048,9 @@ export class SoundSynthesizer {
       osc.type = 'sine';
 
       if (enabled) {
-        // Upwards chime (880 -> 1320 Hz)
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
       } else {
-        // Downwards chime (1320 -> 660 Hz)
         osc.frequency.setValueAtTime(1320, now);
         osc.frequency.exponentialRampToValueAtTime(660, now + 0.08);
       }
@@ -1002,7 +1062,7 @@ export class SoundSynthesizer {
       gain.connect(this.ctx.destination);
       osc.start(now);
       osc.stop(now + 0.1);
-    } catch (e) {
+    } catch {
       // ignore
     }
   }

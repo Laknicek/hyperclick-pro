@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { 
   Activity, 
   Flame, 
@@ -7,10 +7,7 @@ import {
   Cpu, 
   RotateCcw, 
   Download, 
-  Zap, 
-  ShieldCheck,
   TrendingUp,
-  Percent
 } from 'lucide-react';
 import { TelemetryData } from '../types';
 
@@ -24,130 +21,217 @@ export const TelemetryView: React.FC<TelemetryViewProps> = ({
   onResetTelemetry,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const phaseRef = useRef<number>(0);
 
   // Format session duration (HH:MM:SS)
   const formatDuration = (totalSeconds: number) => {
     const hrs = Math.floor(totalSeconds / 3600);
     const mins = Math.floor((totalSeconds % 3600) / 60);
-    const secs = totalSeconds % 60;
+    const secs = Math.floor(totalSeconds % 60);
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Live Canvas 60 FPS Telemetry Waveform Renderer
+  // High-DPI Retina Canvas 60 FPS Telemetry Waveform Renderer
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let isSubscribed = true;
 
-    const render = () => {
-      const { width, height } = canvas;
-      ctx.clearRect(0, 0, width, height);
+    // Handle high-DPI retina display scaling
+    const resizeCanvas = () => {
+      if (!canvas || !container) return;
+      const rect = container.getBoundingClientRect();
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      
+      const displayWidth = Math.floor(rect.width);
+      const displayHeight = Math.floor(rect.height);
 
-      // Background Cyber Grid
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-      ctx.lineWidth = 1;
-      const gridSize = 24;
-      for (let x = 0; x < width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
-
-      // Render CPS waveform
-      const history = telemetry.cpsHistory && telemetry.cpsHistory.length > 0
-        ? telemetry.cpsHistory 
-        : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-
-      const maxVal = Math.max(25, telemetry.peakCps * 1.15, ...history);
-      const stepX = width / Math.max(1, history.length - 1);
-
-      // Gradient Area Fill
-      const gradient = ctx.createLinearGradient(0, 0, 0, height);
-      gradient.addColorStop(0, 'rgba(0, 242, 254, 0.35)');
-      gradient.addColorStop(0.5, 'rgba(127, 0, 255, 0.15)');
-      gradient.addColorStop(1, 'rgba(0, 242, 254, 0.0)');
-
-      ctx.beginPath();
-      ctx.moveTo(0, height);
-
-      for (let i = 0; i < history.length; i++) {
-        const x = i * stepX;
-        const normalizedY = (history[i] / maxVal) * (height - 30);
-        const y = height - Math.max(4, normalizedY) - 10;
-        if (i === 0) {
-          ctx.lineTo(x, y);
-        } else {
-          // Smooth curve using bezier
-          const prevX = (i - 1) * stepX;
-          const prevNormY = (history[i - 1] / maxVal) * (height - 30);
-          const prevY = height - Math.max(4, prevNormY) - 10;
-          const cpX = (prevX + x) / 2;
-          ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
+      if (displayWidth > 0 && displayHeight > 0) {
+        if (canvas.width !== displayWidth * dpr || canvas.height !== displayHeight * dpr) {
+          canvas.width = displayWidth * dpr;
+          canvas.height = displayHeight * dpr;
+          ctx.resetTransform();
+          ctx.scale(dpr, dpr);
         }
-      }
-
-      ctx.lineTo(width, height);
-      ctx.closePath();
-      ctx.fillStyle = gradient;
-      ctx.fill();
-
-      // Top glowing stroke line
-      ctx.beginPath();
-      for (let i = 0; i < history.length; i++) {
-        const x = i * stepX;
-        const normalizedY = (history[i] / maxVal) * (height - 30);
-        const y = height - Math.max(4, normalizedY) - 10;
-        if (i === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          const prevX = (i - 1) * stepX;
-          const prevNormY = (history[i - 1] / maxVal) * (height - 30);
-          const prevY = height - Math.max(4, prevNormY) - 10;
-          const cpX = (prevX + x) / 2;
-          ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
-        }
-      }
-      ctx.strokeStyle = '#00f2fe';
-      ctx.lineWidth = 2.5;
-      ctx.shadowColor = '#00f2fe';
-      ctx.shadowBlur = 12;
-      ctx.stroke();
-      ctx.shadowBlur = 0; // reset
-
-      // Draw latest point dot with glowing pulse
-      if (history.length > 0) {
-        const lastIdx = history.length - 1;
-        const lastX = lastIdx * stepX;
-        const lastNormY = (history[lastIdx] / maxVal) * (height - 30);
-        const lastY = height - Math.max(4, lastNormY) - 10;
-
-        ctx.beginPath();
-        ctx.arc(lastX - 2, lastY, 5, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = '#00f2fe';
-        ctx.shadowBlur = 15;
-        ctx.fill();
-        ctx.shadowBlur = 0;
       }
     };
 
-    render();
-  }, [telemetry.cpsHistory, telemetry.peakCps]);
+    resizeCanvas();
 
-  const handleExportCsv = () => {
+    // ResizeObserver for responsive layout adaptation without memory leaks
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        resizeCanvas();
+      });
+      resizeObserver.observe(container);
+    }
+
+    // 60 FPS Render Loop
+    const render = () => {
+      if (!isSubscribed) return;
+
+      const rect = container.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+
+      if (width > 0 && height > 0) {
+        ctx.clearRect(0, 0, width, height);
+
+        // Subtle moving phase for cyberpunk animation
+        phaseRef.current = (phaseRef.current + (telemetry.isRunning ? 0.04 : 0.01)) % (Math.PI * 2);
+        const gridOffset = (phaseRef.current * 10) % 24;
+
+        // Background Cyber Grid
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
+        ctx.lineWidth = 1;
+        const gridSize = 24;
+        
+        ctx.beginPath();
+        for (let x = -gridOffset; x < width; x += gridSize) {
+          if (x >= 0) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height);
+          }
+        }
+        for (let y = 0; y < height; y += gridSize) {
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+        }
+        ctx.stroke();
+
+        // Horizontal Guide Lines
+        ctx.strokeStyle = 'rgba(0, 242, 254, 0.06)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, height * 0.25);
+        ctx.lineTo(width, height * 0.25);
+        ctx.moveTo(0, height * 0.5);
+        ctx.lineTo(width, height * 0.5);
+        ctx.moveTo(0, height * 0.75);
+        ctx.lineTo(width, height * 0.75);
+        ctx.stroke();
+        ctx.setLineDash([]); // reset dash
+
+        // CPS Waveform
+        const history = telemetry.cpsHistory && telemetry.cpsHistory.length > 0
+          ? telemetry.cpsHistory 
+          : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        const peak = Math.max(10, telemetry.peakCps, ...history);
+        const maxVal = peak * 1.18;
+        const stepX = width / Math.max(1, history.length - 1);
+
+        // Gradient Area Fill under waveform
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, 'rgba(0, 242, 254, 0.30)');
+        gradient.addColorStop(0.5, 'rgba(127, 0, 255, 0.12)');
+        gradient.addColorStop(1, 'rgba(0, 242, 254, 0.0)');
+
+        ctx.beginPath();
+        ctx.moveTo(0, height);
+
+        for (let i = 0; i < history.length; i++) {
+          const x = i * stepX;
+          const normalizedY = (history[i] / maxVal) * (height - 36);
+          const y = height - Math.max(6, normalizedY) - 12;
+          if (i === 0) {
+            ctx.lineTo(x, y);
+          } else {
+            const prevX = (i - 1) * stepX;
+            const prevNormY = (history[i - 1] / maxVal) * (height - 36);
+            const prevY = height - Math.max(6, prevNormY) - 12;
+            const cpX = (prevX + x) / 2;
+            ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
+          }
+        }
+
+        ctx.lineTo(width, height);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        // Glowing Stroke Line
+        ctx.beginPath();
+        for (let i = 0; i < history.length; i++) {
+          const x = i * stepX;
+          const normalizedY = (history[i] / maxVal) * (height - 36);
+          const y = height - Math.max(6, normalizedY) - 12;
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            const prevX = (i - 1) * stepX;
+            const prevNormY = (history[i - 1] / maxVal) * (height - 36);
+            const prevY = height - Math.max(6, prevNormY) - 12;
+            const cpX = (prevX + x) / 2;
+            ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
+          }
+        }
+
+        ctx.strokeStyle = '#00f2fe';
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = '#00f2fe';
+        ctx.shadowBlur = telemetry.isRunning ? 14 : 6;
+        ctx.stroke();
+        ctx.shadowBlur = 0; // reset shadow
+
+        // Render point vertices & head beacon
+        if (history.length > 0) {
+          const lastIdx = history.length - 1;
+          const lastX = lastIdx * stepX;
+          const lastNormY = (history[lastIdx] / maxVal) * (height - 36);
+          const lastY = height - Math.max(6, lastNormY) - 12;
+
+          // Pulse ring around active beacon
+          if (telemetry.isRunning) {
+            const pulseRadius = 5 + Math.sin(phaseRef.current * 3) * 3;
+            ctx.beginPath();
+            ctx.arc(lastX, lastY, Math.max(2, pulseRadius), 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 242, 254, 0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+
+          // Central glowing head dot
+          ctx.beginPath();
+          ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = '#00f2fe';
+          ctx.shadowBlur = 12;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      animFrameRef.current = requestAnimationFrame(render);
+    };
+
+    animFrameRef.current = requestAnimationFrame(render);
+
+    // Guaranteed cleanup on unmount or dependency change
+    return () => {
+      isSubscribed = false;
+      if (animFrameRef.current !== null) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+    };
+  }, [telemetry.cpsHistory, telemetry.peakCps, telemetry.isRunning]);
+
+  const handleExportCsv = useCallback(() => {
     const csvContent = "data:text/csv;charset=utf-8," + 
-      "Timestamp,CPS,TotalClicks,SessionDurationSec\n" +
-      (telemetry.cpsHistory || []).map((cps, i) => `${i},${cps},${telemetry.totalClicks},${telemetry.sessionDuration}`).join("\n");
+      "TimestampIndex,CPS,TotalClicks,SessionDurationSec\n" +
+      (telemetry.cpsHistory || []).map((cps, i) => `${i},${cps.toFixed(2)},${telemetry.totalClicks},${telemetry.sessionDuration.toFixed(1)}`).join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -155,7 +239,7 @@ export const TelemetryView: React.FC<TelemetryViewProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, [telemetry.cpsHistory, telemetry.totalClicks, telemetry.sessionDuration]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -242,7 +326,7 @@ export const TelemetryView: React.FC<TelemetryViewProps> = ({
                 Real-Time CPS Waveform & Performance Stream
               </h3>
               <p className="text-xs text-slate-400 font-mono">
-                High-Resolution 60 FPS Canvas Telemetry
+                High-Resolution 60 FPS Retina Canvas Telemetry
               </p>
             </div>
           </div>
@@ -268,12 +352,13 @@ export const TelemetryView: React.FC<TelemetryViewProps> = ({
           </div>
         </div>
 
-        {/* Dynamic Canvas Element */}
-        <div className="relative w-full h-56 bg-[#0a0c16] rounded-xl overflow-hidden border border-white/[0.06] shadow-inner">
+        {/* Dynamic Canvas Container */}
+        <div 
+          ref={containerRef}
+          className="relative w-full h-56 bg-[#0a0c16] rounded-xl overflow-hidden border border-white/[0.06] shadow-inner"
+        >
           <canvas
             ref={canvasRef}
-            width={720}
-            height={224}
             className="w-full h-full block"
           />
 

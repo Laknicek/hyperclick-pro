@@ -1,7 +1,8 @@
 /**
  * HyperClick Pro 2026 - Smart Pixel Color Detection Engine
  * High-frequency screen sampling, Delta-E / Euclidean color distance matching,
- * area bounding box scanning, condition triggers, and auto-click execution.
+ * area bounding box scanning, condition triggers, procedural sound feedback,
+ * and auto-click execution.
  */
 
 import {
@@ -12,6 +13,7 @@ import {
   PixelTriggerCondition,
   PixelTriggerAction,
 } from '../types/clicker';
+import { soundEngine } from './soundEngine';
 
 export interface PixelCheckResult {
   x: number;
@@ -74,7 +76,6 @@ export class PixelDetector {
   private totalTriggersFired = 0;
   private fpsCounter = 0;
   private currentFps = 0;
-  private fpsTimer = 0;
   private lastResult: PixelCheckResult | null = null;
   private lastTriggerEvent: PixelTriggerEvent | null = null;
   private simulatedColor: string | null = null;
@@ -238,8 +239,8 @@ export class PixelDetector {
         // Fallback
       }
     } else {
-      // Browser preview simulated variance (subtle drift around target for realism)
-      const noise = (Math.random() - 0.5) * 8;
+      // Browser preview simulated subtle drift around target for realistic HUD feedback
+      const noise = (Math.random() - 0.5) * 6;
       detectedRgb = {
         r: Math.max(0, Math.min(255, Math.round(expectedColorRgb.r + noise))),
         g: Math.max(0, Math.min(255, Math.round(expectedColorRgb.g + noise))),
@@ -279,7 +280,7 @@ export class PixelDetector {
     }
   }
 
-  private evaluateCondition(
+  public evaluateCondition(
     condition: PixelTriggerCondition,
     detected: RgbColor,
     target: RgbColor,
@@ -351,15 +352,19 @@ export class PixelDetector {
       clickY = this.config.clickY;
     }
 
-    // Execute configured Action
+    // Execute configured Action & Sound
     const electron = getElectronAPI();
     let success = true;
+
     try {
       if (this.config.soundAlert) {
         if (electron?.playBeepAlert) {
           electron.playBeepAlert();
         } else if (electron?.playSound) {
           electron.playSound('cyber_beep', 0.6);
+        } else {
+          // Fallback to procedural Web Audio synthesizer
+          soundEngine.playClick('cyber-laser');
         }
       }
 
@@ -413,7 +418,7 @@ export class PixelDetector {
     }
 
     const event: PixelTriggerEvent = {
-      id: `pte_${Date.now()}`,
+      id: `pte_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       timestamp: Date.now(),
       configId: this.config.id,
       targetX: clickX,
@@ -434,6 +439,30 @@ export class PixelDetector {
 
   public simulateDetectedColor(hex: string | null): void {
     this.simulatedColor = hex;
+    if (hex && this.config) {
+      const rgb = PixelDetector.hexToRgb(hex);
+      const distance = PixelDetector.computeColorDistance(rgb, this.config.expectedColorRgb);
+      const isMatch = this.evaluateCondition(
+        this.config.triggerCondition,
+        rgb,
+        this.config.expectedColorRgb,
+        distance,
+        this.config.tolerance
+      );
+      const checkResult: PixelCheckResult = {
+        x: this.config.targetX,
+        y: this.config.targetY,
+        detectedHex: hex,
+        detectedRgb: rgb,
+        targetHex: this.config.expectedColorHex,
+        targetRgb: this.config.expectedColorRgb,
+        distancePercent: Math.round(distance * 10) / 10,
+        isMatch,
+        timestamp: Date.now(),
+      };
+      this.lastResult = checkResult;
+      this.listeners.forEach((l) => l.onPixelChecked?.(checkResult));
+    }
   }
 
   public testSimulateTrigger(): void {
@@ -456,6 +485,7 @@ export class PixelDetector {
    * Converts HEX string (#RRGGBB or #RGB) to RgbColor
    */
   public static hexToRgb(hex: string): RgbColor {
+    if (!hex) return { r: 0, g: 0, b: 0 };
     const cleanHex = hex.replace('#', '').trim();
     if (cleanHex.length === 3) {
       const r = parseInt(cleanHex[0] + cleanHex[0], 16);
@@ -478,7 +508,7 @@ export class PixelDetector {
    */
   public static rgbToHex(rgb: RgbColor): string {
     const toHex = (c: number) => {
-      const hex = Math.max(0, Math.min(255, Math.round(c))).toString(16).toUpperCase();
+      const hex = Math.max(0, Math.min(255, Math.round(isNaN(c) ? 0 : c))).toString(16).toUpperCase();
       return hex.length === 1 ? '0' + hex : hex;
     };
     return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
@@ -488,9 +518,9 @@ export class PixelDetector {
    * Converts RGB to HSL
    */
   public static rgbToHsl(rgb: RgbColor): HslColor {
-    const r = rgb.r / 255;
-    const g = rgb.g / 255;
-    const b = rgb.b / 255;
+    const r = (rgb.r || 0) / 255;
+    const g = (rgb.g || 0) / 255;
+    const b = (rgb.b || 0) / 255;
 
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
@@ -526,7 +556,7 @@ export class PixelDetector {
    * Computes perceptual human brightness (ITU-R BT.709) [0 - 255]
    */
   public static calculatePerceivedBrightness(rgb: RgbColor): number {
-    return Math.round(0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b);
+    return Math.round(0.2126 * (rgb.r || 0) + 0.7152 * (rgb.g || 0) + 0.0722 * (rgb.b || 0));
   }
 
   /**
@@ -534,10 +564,18 @@ export class PixelDetector {
    * Returns distance percentage from 0 (identical) to 100 (max divergence)
    */
   public static computeColorDistance(c1: RgbColor, c2: RgbColor): number {
-    const rMean = (c1.r + c2.r) / 2;
-    const deltaR = c1.r - c2.r;
-    const deltaG = c1.g - c2.g;
-    const deltaB = c1.b - c2.b;
+    const r1 = c1.r || 0;
+    const g1 = c1.g || 0;
+    const b1 = c1.b || 0;
+
+    const r2 = c2.r || 0;
+    const g2 = c2.g || 0;
+    const b2 = c2.b || 0;
+
+    const rMean = (r1 + r2) / 2;
+    const deltaR = r1 - r2;
+    const deltaG = g1 - g2;
+    const deltaB = b1 - b2;
 
     // Perceptually weighted red-mean color difference formula
     const weightR = 2 + rMean / 256;
@@ -554,3 +592,4 @@ export class PixelDetector {
 }
 
 export const pixelDetector = PixelDetector.getInstance();
+export default pixelDetector;

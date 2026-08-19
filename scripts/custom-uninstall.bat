@@ -15,9 +15,21 @@ set "KEEP_DATA=0"
 :: Parse arguments
 :PARSE_ARGS
 if "%~1"=="" goto ARGS_DONE
-if /i "%~1"=="/SILENT" set "SILENT_MODE=1"
-if /i "%~1"=="/S" set "SILENT_MODE=1"
-if /i "%~1"=="/KEEP_DATA" set "KEEP_DATA=1"
+if /i "%~1"=="/SILENT" (
+    set "SILENT_MODE=1"
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/S" (
+    set "SILENT_MODE=1"
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/KEEP_DATA" (
+    set "KEEP_DATA=1"
+    shift
+    goto PARSE_ARGS
+)
 shift
 goto PARSE_ARGS
 :ARGS_DONE
@@ -27,9 +39,9 @@ set "INSTALL_DIR=%~dp0"
 if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
 
 :: Check registry for install directory if needed
-for /f "tokens=2* delims=	 " %%A in ('reg query "%REG_KEY%" /v "InstallLocation" 2^>nul') do (
-    if "%%A"=="InstallLocation" (
-        set "INSTALL_DIR=%%B"
+for /f "tokens=1,2* delims=	 " %%A in ('reg query "%REG_KEY%" /v "InstallLocation" 2^>nul') do (
+    if /i "%%A"=="InstallLocation" (
+        set "INSTALL_DIR=%%C"
     )
 )
 
@@ -73,7 +85,7 @@ if /i "%CLEAN_CONFIG%"=="Y" (
 :: Execute Uninstallation
 :: ============================================================================
 :DO_UNINSTALL
-cls
+if "%SILENT_MODE%"=="0" cls
 echo ===============================================================================
 echo                    REMOVING HYPERCLICK PRO 2026
 echo ===============================================================================
@@ -103,10 +115,11 @@ echo [*] Removing Windows Registry entries...
 reg delete "%REG_KEY%" /f >nul 2>&1
 reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\HyperClickPro" /f >nul 2>&1
 reg delete "HKCU\Software\HyperClick Pro" /f >nul 2>&1
+reg delete "HKCU\Software\Classes\hyperclick" /f >nul 2>&1
 
 :: 5. Clean AppData user settings if requested
 if "%KEEP_DATA%"=="0" (
-    echo [*] Cleaning user settings & profile configs...
+    echo [*] Cleaning user settings ^& profile configs...
     if exist "%APPDATA%\hyperclick-pro" rd /S /Q "%APPDATA%\hyperclick-pro" >nul 2>&1
     if exist "%LOCALAPPDATA%\hyperclick-pro-updater" rd /S /Q "%LOCALAPPDATA%\hyperclick-pro-updater" >nul 2>&1
 )
@@ -114,8 +127,7 @@ if "%KEEP_DATA%"=="0" (
 :: 6. Remove Installation Directory
 echo [*] Deleting installed files...
 if exist "%INSTALL_DIR%" (
-    :: Launch asynchronous cleaner script so this batch file can delete itself safely
-    start "" /b cmd /c "timeout /t 1 /nobreak >nul & rd /s /q \"%INSTALL_DIR%\" 2>nul"
+    start "" /b cmd /c "ping 127.0.0.1 -n 2 >nul & rd /s /q \"%INSTALL_DIR%\" 2>nul"
 )
 
 echo.

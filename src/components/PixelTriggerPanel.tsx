@@ -20,6 +20,9 @@ import {
   Radio,
   SlidersHorizontal,
   Flame,
+  Pipette,
+  Check,
+  RefreshCw,
 } from 'lucide-react';
 import {
   PixelTriggerConfig,
@@ -36,6 +39,7 @@ import {
   PixelDetectorStatus,
   PixelDetector,
 } from '../services/pixelDetector';
+import { soundEngine } from '../services/soundEngine';
 import { cn } from '../utils/cn';
 
 interface PixelTriggerPanelProps {
@@ -62,8 +66,20 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
   const [triggerHistory, setTriggerHistory] = useState<PixelTriggerEvent[]>([]);
   const [isPickingPixel, setIsPickingPixel] = useState<boolean>(false);
   const [testSimulatedHex, setTestSimulatedHex] = useState<string>(config.expectedColorHex);
+  const [isSimulatingColor, setIsSimulatingColor] = useState<boolean>(false);
 
   const radarCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const latestCheckRef = useRef<PixelCheckResult | null>(null);
+  const detectorStatusRef = useRef<PixelDetectorStatus>(detectorStatus);
+
+  // Keep refs in sync for the continuous 60fps radar render loop
+  useEffect(() => {
+    latestCheckRef.current = latestCheck;
+  }, [latestCheck]);
+
+  useEffect(() => {
+    detectorStatusRef.current = detectorStatus;
+  }, [detectorStatus]);
 
   // ----------------------------------------------------
   // Sync & Event Subscriptions
@@ -74,7 +90,7 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
         setLatestCheck(result);
       },
       onTriggerFired: (event) => {
-        setTriggerHistory((prev) => [event, ...prev.slice(0, 19)]);
+        setTriggerHistory((prev) => [event, ...prev].slice(0, 50));
       },
       onStatusChange: (status) => {
         setDetectorStatus(status);
@@ -102,6 +118,7 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
   };
 
   const handleToggleDetector = () => {
+    soundEngine.playClick('kailh-box-white');
     if (detectorStatus.isActive) {
       pixelDetector.stop();
       updateConfig({ enabled: false });
@@ -112,7 +129,62 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
   };
 
   // ----------------------------------------------------
-  // Radar HUD Visualizer
+  // Screen Pixel Picker
+  // ----------------------------------------------------
+  const handlePickScreenPixel = async () => {
+    soundEngine.playClick('cyber-laser');
+    setIsPickingPixel(true);
+
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.pickCoordinates) {
+      try {
+        const result = await (window as any).electronAPI.pickCoordinates();
+        if (result && !result.canceled) {
+          const updates: Partial<PixelTriggerConfig> = {
+            targetX: result.x,
+            targetY: result.y,
+          };
+          if (result.colorHex) {
+            updates.expectedColorHex = result.colorHex;
+            updates.expectedColorRgb = PixelDetector.hexToRgb(result.colorHex);
+          }
+          updateConfig(updates);
+          soundEngine.playClick('bubble-pop');
+        }
+      } catch {
+        // Ignored
+      } finally {
+        setIsPickingPixel(false);
+      }
+    } else {
+      // Browser preview simulated coordinate pick
+      setTimeout(() => {
+        const simulatedX = Math.round(300 + Math.random() * 1200);
+        const simulatedY = Math.round(200 + Math.random() * 600);
+        updateConfig({ targetX: simulatedX, targetY: simulatedY });
+        setIsPickingPixel(false);
+        soundEngine.playClick('bubble-pop');
+      }, 400);
+    }
+  };
+
+  // ----------------------------------------------------
+  // Live Simulation Test Injection
+  // ----------------------------------------------------
+  const handleInjectSimulatedColor = (hex: string) => {
+    setTestSimulatedHex(hex);
+    setIsSimulatingColor(true);
+    pixelDetector.simulateDetectedColor(hex);
+    soundEngine.playClick('tech-pulse');
+  };
+
+  const handleResetSimulatedColor = () => {
+    setIsSimulatingColor(false);
+    pixelDetector.simulateDetectedColor(null);
+    soundEngine.playClick('tech-pulse');
+  };
+
+  // ----------------------------------------------------
+  // 60FPS Radar HUD Visualizer (Glitch-Free Loop)
   // ----------------------------------------------------
   useEffect(() => {
     const canvas = radarCanvasRef.current;
@@ -120,7 +192,7 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationFrame: number;
+    let animationFrameId: number;
     let sweepAngle = 0;
 
     const renderRadar = () => {
@@ -150,9 +222,13 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
       ctx.lineTo(cx + maxRadius, cy);
       ctx.stroke();
 
+      const isActive = detectorStatusRef.current.isActive;
+      const lastCheck = latestCheckRef.current;
+      const isMatch = lastCheck?.isMatch;
+
       // 2. Active Scanning Sweep
-      if (detectorStatus.isActive) {
-        sweepAngle = (sweepAngle + 0.04) % (Math.PI * 2);
+      if (isActive) {
+        sweepAngle = (sweepAngle + 0.035) % (Math.PI * 2);
 
         // Sweep cone gradient
         const sweepGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxRadius);
@@ -176,14 +252,13 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
         ctx.strokeStyle = '#00f2fe';
         ctx.lineWidth = 2;
         ctx.shadowColor = '#00f2fe';
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 8;
         ctx.stroke();
         ctx.shadowBlur = 0;
       }
 
       // 3. Center Target Blip
-      const isMatch = latestCheck?.isMatch;
-      const blipColor = isMatch ? '#00f5a0' : detectorStatus.isActive ? '#00f2fe' : '#64748b';
+      const blipColor = isMatch ? '#00f5a0' : isActive ? '#00f2fe' : '#64748b';
 
       ctx.beginPath();
       ctx.arc(cx, cy, 5, 0, Math.PI * 2);
@@ -195,20 +270,23 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
         ctx.arc(cx, cy, 12, 0, Math.PI * 2);
         ctx.strokeStyle = '#00f5a0';
         ctx.lineWidth = 1.5;
+        ctx.shadowColor = '#00f5a0';
+        ctx.shadowBlur = 10;
         ctx.stroke();
+        ctx.shadowBlur = 0;
       }
 
-      animationFrame = requestAnimationFrame(renderRadar);
+      animationFrameId = requestAnimationFrame(renderRadar);
     };
 
-    renderRadar();
+    animationFrameId = requestAnimationFrame(renderRadar);
 
     return () => {
-      cancelAnimationFrame(animationFrame);
+      cancelAnimationFrame(animationFrameId);
     };
-  }, [detectorStatus.isActive, latestCheck]);
+  }, []); // Run continuous loop once on mount
 
-  // Color differences calculations
+  // Color difference calculations
   const detectedHex = latestCheck?.detectedHex || '#000000';
   const detectedRgb = latestCheck?.detectedRgb || { r: 0, g: 0, b: 0 };
   const diffPercent = latestCheck?.distancePercent ?? 0;
@@ -249,10 +327,28 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
           </div>
         </div>
 
-        {/* Master Trigger Toggle & Test Simulation */}
-        <div className="flex items-center gap-2.5">
+        {/* Master Trigger Toggle, Pick Screen Pixel & Test Simulation */}
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => pixelDetector.testSimulateTrigger()}
+            onClick={handlePickScreenPixel}
+            disabled={isPickingPixel}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all active:scale-95',
+              isPickingPixel
+                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 animate-pulse'
+                : 'bg-surface-100 hover:bg-surface-200 border-border text-slate-300'
+            )}
+            title="Pick Coordinates directly from screen"
+          >
+            <Pipette className="w-4 h-4 text-accent-cyan" />
+            <span>{isPickingPixel ? 'Picking...' : 'Pick Pixel'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundEngine.playClick('retro-arcade');
+              pixelDetector.testSimulateTrigger();
+            }}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-100 hover:bg-surface-200 border border-border text-xs font-semibold text-slate-300 transition-all active:scale-95"
             title="Simulate Instant Match & Trigger"
           >
@@ -266,7 +362,7 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
               'flex items-center gap-2 px-5 py-2 rounded-xl font-bold text-xs shadow-glass transition-all transform active:scale-95',
               detectorStatus.isActive
                 ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-glow-rose'
-                : 'bg-gradient-to-r from-accent-cyan to-accent-emerald text-slate-950 shadow-glow-cyan'
+                : 'bg-gradient-to-r from-accent-cyan to-accent-emerald text-slate-950 shadow-glow-cyan font-black'
             )}
           >
             {detectorStatus.isActive ? (
@@ -416,6 +512,34 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
             <div className="p-2 rounded-xl bg-surface-50 border border-white/5">
               <span className="text-[10px] text-slate-500 uppercase block">Check Interval</span>
               <span className="font-bold text-purple-300">{config.checkIntervalMs}ms</span>
+            </div>
+          </div>
+
+          {/* Live Simulator Test Injector */}
+          <div className="pt-2 border-t border-white/5 flex items-center justify-between gap-2">
+            <span className="text-[11px] text-slate-400 font-semibold">Simulator Test Injector:</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={testSimulatedHex}
+                onChange={(e) => handleInjectSimulatedColor(e.target.value)}
+                className="w-6 h-6 rounded cursor-pointer bg-transparent border-0"
+              />
+              <button
+                onClick={() => handleInjectSimulatedColor(config.expectedColorHex)}
+                className="px-2 py-1 rounded-lg bg-surface-100 hover:bg-surface-200 border border-white/10 text-[10px] font-mono text-cyan-300"
+              >
+                Inject Match
+              </button>
+              {isSimulatingColor && (
+                <button
+                  onClick={handleResetSimulatedColor}
+                  className="px-2 py-1 rounded-lg bg-surface-100 hover:bg-surface-200 border border-white/10 text-[10px] font-mono text-slate-400"
+                  title="Reset to live screen sampling"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -603,11 +727,15 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
                 )}
                 <div>
                   <span className="text-xs font-semibold text-white block">Audio Confirmation Beep</span>
-                  <span className="text-[10px] text-slate-400">Play tone when pixel trigger fires</span>
+                  <span className="text-[10px] text-slate-400">Play procedural tone when pixel trigger fires</span>
                 </div>
               </div>
               <button
-                onClick={() => updateConfig({ soundAlert: !config.soundAlert })}
+                onClick={() => {
+                  const newAlert = !config.soundAlert;
+                  updateConfig({ soundAlert: newAlert });
+                  if (newAlert) soundEngine.playClick('cyber-laser');
+                }}
                 className={cn(
                   'px-3 py-1 rounded-lg text-xs font-semibold border transition-all',
                   config.soundAlert
@@ -625,7 +753,7 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
       {/* -------------------------------------------------- */}
       {/* Trigger Event Activity Log */}
       {/* -------------------------------------------------- */}
-      <div className="p-4 rounded-2xl bg-card border border-border flex flex-col gap-3">
+      <div className="p-4 rounded-2xl bg-card border border-border flex flex-col gap-3 shadow-glass">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-accent-cyan" />
@@ -673,3 +801,5 @@ export const PixelTriggerPanel: React.FC<PixelTriggerPanelProps> = ({
     </div>
   );
 };
+
+export default PixelTriggerPanel;

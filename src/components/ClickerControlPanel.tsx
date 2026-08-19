@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { 
   Play, 
   Square, 
@@ -13,10 +13,13 @@ import {
   Flame,
   CheckCircle2,
   HelpCircle,
-  Maximize2
+  Maximize2,
+  Shield,
+  Layers,
+  Timer
 } from 'lucide-react';
 import { ClickConfig, MouseButton, ClickType, RepeatMode, CursorMode } from '../types';
-import { playUiChime, playClickSound } from '../utils/audio';
+import { playClickSound } from '../utils/audio';
 
 interface ClickerControlPanelProps {
   config: ClickConfig;
@@ -35,28 +38,52 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
   onPickLocation,
   soundEnabled,
 }) => {
-  // Calculate total interval in milliseconds and derived CPS
-  const totalMs = 
-    config.interval.hours * 3600000 +
-    config.interval.minutes * 60000 +
-    config.interval.seconds * 1000 +
-    config.interval.milliseconds +
-    config.interval.microseconds / 1000;
+  // Sanitize and calculate total interval in milliseconds
+  const safeHours = Math.max(0, config.interval.hours || 0);
+  const safeMinutes = Math.max(0, config.interval.minutes || 0);
+  const safeSeconds = Math.max(0, config.interval.seconds || 0);
+  const safeMillis = Math.max(0, config.interval.milliseconds || 0);
+  const safeMicros = Math.max(0, config.interval.microseconds || 0);
 
-  const theoreticalCps = totalMs > 0 ? (1000 / totalMs) : 1000;
+  const totalMs = 
+    safeHours * 3600000 +
+    safeMinutes * 60000 +
+    safeSeconds * 1000 +
+    safeMillis +
+    safeMicros / 1000;
+
+  // Compute accurate CPS display string
+  const getCpsDisplay = (): string => {
+    if (totalMs <= 0) return '1,000+ CPS (Ultra)';
+    const calculatedCps = 1000 / totalMs;
+    if (calculatedCps >= 1000) return `${Math.round(calculatedCps).toLocaleString()} CPS`;
+    if (calculatedCps >= 100) return `${calculatedCps.toFixed(0)} CPS`;
+    if (calculatedCps >= 10) return `${calculatedCps.toFixed(1)} CPS`;
+    if (calculatedCps >= 1) return `${calculatedCps.toFixed(2)} CPS`;
+    return `${calculatedCps.toFixed(3)} CPS`;
+  };
 
   // Quick Speed Presets
   const speedPresets = [
-    { label: '1,000 CPS (1ms)', ms: 1, us: 0, s: 0 },
-    { label: '100 CPS (10ms)', ms: 10, us: 0, s: 0 },
-    { label: '50 CPS (20ms)', ms: 20, us: 0, s: 0 },
-    { label: '20 CPS (50ms)', ms: 50, us: 0, s: 0 },
-    { label: '10 CPS (100ms)', ms: 100, us: 0, s: 0 },
-    { label: '1 CPS (1s)', ms: 0, us: 0, s: 1 },
+    { label: '1,000 CPS (1ms)', ms: 1, us: 0, s: 0, m: 0, h: 0 },
+    { label: '100 CPS (10ms)', ms: 10, us: 0, s: 0, m: 0, h: 0 },
+    { label: '50 CPS (20ms)', ms: 20, us: 0, s: 0, m: 0, h: 0 },
+    { label: '20 CPS (50ms)', ms: 50, us: 0, s: 0, m: 0, h: 0 },
+    { label: '10 CPS (100ms)', ms: 100, us: 0, s: 0, m: 0, h: 0 },
+    { label: '1 CPS (1s)', ms: 0, us: 0, s: 1, m: 0, h: 0 },
   ];
 
   const handleIntervalChange = (key: keyof typeof config.interval, val: string) => {
-    const num = Math.max(0, parseInt(val, 10) || 0);
+    let num = parseInt(val, 10);
+    if (isNaN(num) || num < 0) num = 0;
+    
+    // Bounds sanitization
+    if (key === 'hours') num = Math.min(999, num);
+    if (key === 'minutes') num = Math.min(59, num);
+    if (key === 'seconds') num = Math.min(59, num);
+    if (key === 'milliseconds') num = Math.min(999, num);
+    if (key === 'microseconds') num = Math.min(999, num);
+
     onChangeConfig({
       interval: {
         ...config.interval,
@@ -69,8 +96,8 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
     if (soundEnabled) playClickSound('subtle', 0.2);
     onChangeConfig({
       interval: {
-        hours: 0,
-        minutes: 0,
+        hours: preset.h,
+        minutes: preset.m,
         seconds: preset.s,
         milliseconds: preset.ms,
         microseconds: preset.us,
@@ -91,15 +118,20 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
               <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
                 <Clock className="w-4 h-4" />
               </div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-200">
-                Click Interval & Timing
-              </h2>
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-200">
+                  Click Interval & Speed Calibration
+                </h2>
+                <p className="text-[11px] text-slate-400 font-mono">
+                  Cycle Interval: {totalMs.toFixed(totalMs < 10 ? 3 : 1)} ms
+                </p>
+              </div>
             </div>
             
             {/* Theoretical CPS badge */}
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono text-xs">
               <Flame className="w-3.5 h-3.5 text-cyan-400 fill-cyan-400 animate-pulse" />
-              <span>Target: <strong className="text-white">{theoreticalCps >= 1000 ? '1,000+' : theoreticalCps.toFixed(1)} CPS</strong></span>
+              <span>Target: <strong className="text-white">{getCpsDisplay()}</strong></span>
             </div>
           </div>
 
@@ -113,8 +145,9 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
               <input
                 type="number"
                 min="0"
-                max="99"
-                value={config.interval.hours}
+                max="999"
+                value={config.interval.hours === 0 ? '' : config.interval.hours}
+                placeholder="0"
                 onChange={(e) => handleIntervalChange('hours', e.target.value)}
                 disabled={isRunning}
                 className="glass-input rounded-xl px-2 py-2 text-center text-sm font-semibold text-white focus:ring-1 focus:ring-cyan-400 disabled:opacity-50"
@@ -130,7 +163,8 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 type="number"
                 min="0"
                 max="59"
-                value={config.interval.minutes}
+                value={config.interval.minutes === 0 ? '' : config.interval.minutes}
+                placeholder="0"
                 onChange={(e) => handleIntervalChange('minutes', e.target.value)}
                 disabled={isRunning}
                 className="glass-input rounded-xl px-2 py-2 text-center text-sm font-semibold text-white focus:ring-1 focus:ring-cyan-400 disabled:opacity-50"
@@ -146,7 +180,8 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 type="number"
                 min="0"
                 max="59"
-                value={config.interval.seconds}
+                value={config.interval.seconds === 0 ? '' : config.interval.seconds}
+                placeholder="0"
                 onChange={(e) => handleIntervalChange('seconds', e.target.value)}
                 disabled={isRunning}
                 className="glass-input rounded-xl px-2 py-2 text-center text-sm font-semibold text-white focus:ring-1 focus:ring-cyan-400 disabled:opacity-50"
@@ -162,7 +197,8 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 type="number"
                 min="0"
                 max="999"
-                value={config.interval.milliseconds}
+                value={config.interval.milliseconds === 0 ? '' : config.interval.milliseconds}
+                placeholder="0"
                 onChange={(e) => handleIntervalChange('milliseconds', e.target.value)}
                 disabled={isRunning}
                 className="glass-input rounded-xl px-2 py-2 text-center text-sm font-bold text-cyan-300 border-cyan-500/40 shadow-glow-cyan focus:ring-1 focus:ring-cyan-400 disabled:opacity-50"
@@ -179,7 +215,8 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 min="0"
                 max="999"
                 step="50"
-                value={config.interval.microseconds}
+                value={config.interval.microseconds === 0 ? '' : config.interval.microseconds}
+                placeholder="0"
                 onChange={(e) => handleIntervalChange('microseconds', e.target.value)}
                 disabled={isRunning}
                 className="glass-input rounded-xl px-2 py-2 text-center text-sm font-bold text-purple-300 border-purple-500/30 focus:ring-1 focus:ring-purple-400 disabled:opacity-50"
@@ -188,7 +225,7 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
           </div>
 
           {/* Quick Speed Preset Chips */}
-          <div className="flex items-center gap-1.5 flex-wrap pt-1">
+          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-white/[0.04]">
             <span className="text-[11px] text-slate-400 font-medium mr-1">Quick Select:</span>
             {speedPresets.map((preset, idx) => (
               <button
@@ -214,7 +251,7 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 <MousePointer2 className="w-4 h-4" />
               </div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                Mouse Button
+                Mouse Button Selection
               </h3>
             </div>
 
@@ -255,7 +292,7 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                       : 'bg-white/[0.02] text-slate-400 hover:text-white border border-white/[0.06]'
                   } disabled:opacity-50`}
                 >
-                  Extra {btn.toUpperCase()} (Side)
+                  Side {btn.toUpperCase()} (Thumb)
                 </button>
               ))}
             </div>
@@ -315,16 +352,37 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
             </div>
 
             {config.clickType === 'burst' && (
-              <div className="mt-3 pt-2 border-t border-white/[0.06] flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">Burst Count:</span>
-                <input
-                  type="number"
-                  min="2"
-                  max="20"
-                  value={config.burstCount}
-                  onChange={(e) => onChangeConfig({ burstCount: Math.max(2, parseInt(e.target.value, 10) || 2) })}
-                  className="glass-input rounded-lg w-16 px-2 py-1 text-center text-xs font-bold text-purple-300"
-                />
+              <div className="mt-3 pt-2 border-t border-white/[0.06] grid grid-cols-2 gap-2 text-xs font-mono">
+                <div className="flex items-center justify-between bg-black/40 px-2 py-1 rounded-lg border border-white/[0.04]">
+                  <span className="text-slate-400">Volley Clicks:</span>
+                  <input
+                    type="number"
+                    min="2"
+                    max="50"
+                    value={config.burstCount || 3}
+                    onChange={(e) => onChangeConfig({ 
+                      burstCount: Math.max(2, Math.min(50, parseInt(e.target.value, 10) || 2)) 
+                    })}
+                    className="glass-input rounded w-12 px-1 py-0.5 text-center text-xs font-bold text-purple-300"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between bg-black/40 px-2 py-1 rounded-lg border border-white/[0.04]">
+                  <span className="text-slate-400">Delay:</span>
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      type="number"
+                      min="5"
+                      max="500"
+                      value={config.burstIntervalMs || 25}
+                      onChange={(e) => onChangeConfig({ 
+                        burstIntervalMs: Math.max(5, Math.min(500, parseInt(e.target.value, 10) || 25)) 
+                      })}
+                      className="glass-input rounded w-12 px-1 py-0.5 text-center text-xs font-bold text-purple-300"
+                    />
+                    <span className="text-slate-500 text-[10px]">ms</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -380,12 +438,16 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 <input
                   type="number"
                   min="1"
-                  max="1000000"
-                  value={config.repeatCount}
-                  onChange={(e) => onChangeConfig({ 
-                    repeatMode: 'count',
-                    repeatCount: Math.max(1, parseInt(e.target.value, 10) || 1) 
-                  })}
+                  max="10000000"
+                  value={config.repeatCount || ''}
+                  placeholder="1000"
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    onChangeConfig({ 
+                      repeatMode: 'count',
+                      repeatCount: isNaN(val) || val < 1 ? 1 : val 
+                    });
+                  }}
                   disabled={isRunning}
                   className="glass-input rounded-lg w-full px-2 py-1 text-xs font-bold text-center text-white"
                 />
@@ -410,12 +472,15 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 <input
                   type="number"
                   min="1"
-                  max="3600"
-                  value={Math.round(config.repeatDurationMs / 1000)}
-                  onChange={(e) => onChangeConfig({ 
-                    repeatMode: 'duration',
-                    repeatDurationMs: Math.max(1000, (parseInt(e.target.value, 10) || 1) * 1000) 
-                  })}
+                  max="86400"
+                  value={Math.round((config.repeatDurationMs || 60000) / 1000)}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    onChangeConfig({ 
+                      repeatMode: 'duration',
+                      repeatDurationMs: Math.max(1000, (isNaN(val) || val < 1 ? 1 : val) * 1000) 
+                    });
+                  }}
                   disabled={isRunning}
                   className="glass-input rounded-lg w-full px-2 py-1 text-xs font-bold text-center text-white"
                 />
@@ -438,7 +503,7 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                 <Crosshair className="w-4 h-4" />
               </div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                Cursor Target
+                Cursor Target Mode
               </h3>
             </div>
           </div>
@@ -458,7 +523,7 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                   : 'bg-white/[0.02] text-slate-400 border border-white/[0.06]'
               } disabled:opacity-50`}
             >
-              Current Location
+              Dynamic (Live)
             </button>
 
             <button
@@ -486,10 +551,15 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                   <span className="text-xs font-mono text-amber-400 font-bold">X:</span>
                   <input
                     type="number"
+                    min="0"
+                    max="7680"
                     value={config.fixedCoords.x}
-                    onChange={(e) => onChangeConfig({
-                      fixedCoords: { ...config.fixedCoords, x: parseInt(e.target.value, 10) || 0 }
-                    })}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      onChangeConfig({
+                        fixedCoords: { ...config.fixedCoords, x: isNaN(val) || val < 0 ? 0 : val }
+                      });
+                    }}
                     disabled={isRunning}
                     className="glass-input bg-transparent border-0 w-full text-xs font-mono font-bold text-white focus:ring-0 p-0"
                   />
@@ -499,10 +569,15 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
                   <span className="text-xs font-mono text-amber-400 font-bold">Y:</span>
                   <input
                     type="number"
+                    min="0"
+                    max="4320"
                     value={config.fixedCoords.y}
-                    onChange={(e) => onChangeConfig({
-                      fixedCoords: { ...config.fixedCoords, y: parseInt(e.target.value, 10) || 0 }
-                    })}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      onChangeConfig({
+                        fixedCoords: { ...config.fixedCoords, y: isNaN(val) || val < 0 ? 0 : val }
+                      });
+                    }}
                     disabled={isRunning}
                     className="glass-input bg-transparent border-0 w-full text-xs font-mono font-bold text-white focus:ring-0 p-0"
                   />
@@ -523,7 +598,7 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
           ) : (
             <div className="p-3 rounded-xl bg-black/30 border border-white/[0.04] text-xs text-slate-400 flex items-center gap-2">
               <MousePointer2 className="w-4 h-4 text-slate-500 shrink-0" />
-              <span>Clicks wherever your mouse cursor hovers in real-time.</span>
+              <span>Clicks wherever your mouse cursor hovers across any desktop display.</span>
             </div>
           )}
 
@@ -534,14 +609,17 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
               <input
                 type="number"
                 min="0"
-                max="50"
+                max="100"
                 value={config.randomCoords.radius}
-                onChange={(e) => onChangeConfig({
-                  randomCoords: {
-                    enabled: (parseInt(e.target.value, 10) || 0) > 0,
-                    radius: Math.max(0, parseInt(e.target.value, 10) || 0)
-                  }
-                })}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                  onChangeConfig({
+                    randomCoords: {
+                      enabled: val > 0,
+                      radius: val,
+                    }
+                  });
+                }}
                 disabled={isRunning}
                 className="glass-input rounded-lg w-14 px-2 py-1 text-center text-xs font-bold text-amber-300"
               />
@@ -604,7 +682,7 @@ export const ClickerControlPanel: React.FC<ClickerControlPanelProps> = ({
           </div>
 
           <p className="text-[11px] text-slate-500 mt-1 text-center">
-            {isRunning ? 'Clicking active at theoretical speed' : 'Press hotkey anywhere on desktop to toggle'}
+            {isRunning ? 'Engine active: clicking continuously' : 'Press hotkey anywhere on desktop to toggle'}
           </p>
         </div>
 

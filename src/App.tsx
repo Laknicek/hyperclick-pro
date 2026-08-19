@@ -10,6 +10,8 @@ import { PresetManager } from './components/PresetManager';
 import { SettingsView } from './components/SettingsView';
 import { MiniHud } from './components/MiniHud';
 import { ToastContainer } from './components/ToastContainer';
+import { UpdateModal } from './components/UpdateModal';
+import { updaterService } from './services/updaterService';
 import { 
   AppView, 
   ClickConfig, 
@@ -28,6 +30,7 @@ export const App: React.FC = () => {
   // Navigation View State
   const [activeTab, setActiveTab] = useState<AppView>('dashboard');
   const [isMiniHudActive, setIsMiniHudActive] = useState(false);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
 
   // Application Settings
   const [settings, setSettings] = useState<AppSettings>({
@@ -116,20 +119,52 @@ export const App: React.FC = () => {
     clickHistory: [],
   });
 
-  // Toast Notifications
+  // Toast Notifications State & Safe Lifecycle
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const addToast = useCallback((title: string, message: string, type: ToastMessage['type'] = 'info') => {
-    const id = `toast-${Date.now()}-${Math.random()}`;
-    setToasts((prev) => [...prev, { id, title, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+  const addToast = useCallback((title: string, message: string, type: ToastMessage['type'] = 'info', duration: number = 4000) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newToast: ToastMessage = { id, title, message, type, duration };
+
+    setToasts((prev) => {
+      // Limit to 5 active toasts to avoid screen crowding
+      const updated = [...prev, newToast];
+      return updated.length > 5 ? updated.slice(-5) : updated;
+    });
+
+    if (duration > 0) {
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, duration);
+    }
   }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const clearAllToasts = useCallback(() => {
+    setToasts([]);
+  }, []);
+
+  // Check for updates on startup if enabled in updater preferences
+  useEffect(() => {
+    const prefs = updaterService.getPreferences();
+    if (prefs.autoCheckOnStartup) {
+      updaterService.checkForUpdates().then((info) => {
+        if (info.hasUpdate) {
+          addToast(
+            'New Version Available!',
+            `HyperClick Pro v${info.latestVersion} is ready for installation.`,
+            'info',
+            6000
+          );
+        }
+      }).catch(() => {
+        // Silent catch on background check
+      });
+    }
+  }, [addToast]);
 
   // Update Settings Partial
   const handleUpdateSettings = (newSettings: Partial<AppSettings>) => {
@@ -177,14 +212,12 @@ export const App: React.FC = () => {
   // Screen Location Picker Trigger
   const handlePickLocation = useCallback(() => {
     addToast('Target Picker Active', 'Click anywhere on screen or press Enter to lock coordinates (F8)', 'warning');
-    // Simulated coordinate capture or Electron screen hook
     if (typeof window !== 'undefined' && (window as any).electron?.pickLocation) {
       (window as any).electron.pickLocation((coords: { x: number; y: number }) => {
         setClickConfig((prev) => ({ ...prev, fixedCoords: coords, cursorMode: 'fixed' }));
         addToast('Coordinates Locked', `X: ${coords.x}, Y: ${coords.y}`, 'success');
       });
     } else {
-      // Browser simulated pick
       const fakeX = Math.round(window.screen.width / 2 + (Math.random() * 200 - 100));
       const fakeY = Math.round(window.screen.height / 2 + (Math.random() * 200 - 100));
       setClickConfig((prev) => ({ ...prev, fixedCoords: { x: fakeX, y: fakeY }, cursorMode: 'fixed' }));
@@ -277,23 +310,16 @@ export const App: React.FC = () => {
   // Global Keyboard Event Listeners for Hotkeys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Hotkey Start/Stop (Default: F6)
       if (e.key.toUpperCase() === settings.hotkeys.startStop.toUpperCase()) {
         e.preventDefault();
         handleToggleStartStop();
-      }
-      // Panic Kill (Default: F12)
-      else if (e.key.toUpperCase() === settings.hotkeys.panicStop.toUpperCase()) {
+      } else if (e.key.toUpperCase() === settings.hotkeys.panicStop.toUpperCase()) {
         e.preventDefault();
         handlePanicStop();
-      }
-      // Pick Location (Default: F8)
-      else if (e.key.toUpperCase() === settings.hotkeys.pickLocation.toUpperCase()) {
+      } else if (e.key.toUpperCase() === settings.hotkeys.pickLocation.toUpperCase()) {
         e.preventDefault();
         handlePickLocation();
-      }
-      // Toggle Mini-HUD (Default: F10)
-      else if (e.key.toUpperCase() === settings.hotkeys.toggleMiniHud.toUpperCase()) {
+      } else if (e.key.toUpperCase() === settings.hotkeys.toggleMiniHud.toUpperCase()) {
         e.preventDefault();
         setIsMiniHudActive((prev) => !prev);
       }
@@ -303,7 +329,7 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [settings.hotkeys, handleToggleStartStop, handlePanicStop, handlePickLocation]);
 
-  // Real-Time High Frequency Engine Simulation & Telemetry Loop (60 FPS)
+  // Real-Time High Frequency Engine Simulation & Telemetry Loop
   useEffect(() => {
     if (!telemetry.isRunning) {
       setTelemetry((prev) => ({
@@ -314,7 +340,6 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Calculate theoretical CPS
     const totalMs = 
       clickConfig.interval.hours * 3600000 +
       clickConfig.interval.minutes * 60000 +
@@ -324,12 +349,11 @@ export const App: React.FC = () => {
     
     const baseCps = totalMs > 0 ? Math.min(1000, 1000 / totalMs) : 1000;
 
-    let timerInterval = 100; // Update telemetry UI every 100ms
+    let timerInterval = 100;
     let clickSoundAccumulator = 0;
 
     const intervalId = setInterval(() => {
       setTelemetry((prev) => {
-        // Apply humanizer jitter variance to CPS if enabled
         let actualCps = baseCps;
         if (humanizerConfig.enabled) {
           const jitterFactor = (Math.random() - 0.5) * (humanizerConfig.timingVariancePercent / 100) * 2;
@@ -341,7 +365,6 @@ export const App: React.FC = () => {
         const newPeak = Math.max(prev.peakCps, actualCps);
         const newHistory = [...prev.cpsHistory.slice(1), actualCps];
 
-        // Play audio switch sound periodically
         if (settings.soundEffects) {
           clickSoundAccumulator++;
           if (clickSoundAccumulator % 3 === 0) {
@@ -388,6 +411,7 @@ export const App: React.FC = () => {
         onToggleMiniHud={() => setIsMiniHudActive(!isMiniHudActive)}
         isMiniHudActive={isMiniHudActive}
         onPanicStop={handlePanicStop}
+        onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
       />
 
       {/* Futuristic Navbar */}
@@ -484,6 +508,7 @@ export const App: React.FC = () => {
               <SettingsView
                 settings={settings}
                 onUpdateSettings={handleUpdateSettings}
+                onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
               />
             </div>
           )}
@@ -506,6 +531,13 @@ export const App: React.FC = () => {
       <ToastContainer
         toasts={toasts}
         onDismiss={dismissToast}
+        onClearAll={clearAllToasts}
+      />
+
+      {/* In-App Release & Update Modal */}
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
       />
     </div>
   );

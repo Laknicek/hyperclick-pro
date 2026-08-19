@@ -22,13 +22,14 @@ import {
   CircleDot,
   Zap,
   ArrowRight,
-  Maximize2,
   Sliders,
   CheckCircle2,
-  Video,
+  AlertTriangle,
   Radio,
-  FileCode,
   Compass,
+  Move,
+  Eye,
+  Maximize2,
 } from 'lucide-react';
 import {
   MacroSequence,
@@ -39,6 +40,7 @@ import {
   Point2D,
   createDefaultWaypoint,
   createDefaultMacroSequence,
+  validateAndSanitizeMacroSequence,
   BUILT_IN_PROFILES,
 } from '../types/clicker';
 import { macroEngine } from '../services/macroEngine';
@@ -70,9 +72,13 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
   const [currentLoop, setCurrentLoop] = useState<number>(0);
   const [isPickingCoord, setIsPickingCoord] = useState<boolean>(false);
   const [magnifierCoord, setMagnifierCoord] = useState<Point2D>({ x: 960, y: 540 });
+  const [isDraggingWaypoint, setIsDraggingWaypoint] = useState<boolean>(false);
+  const [draggedWaypointId, setDraggedWaypointId] = useState<string | null>(null);
+  const [hoveredWaypointId, setHoveredWaypointId] = useState<string | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState<boolean>(false);
+  const [importNotification, setImportNotification] = useState<{ message: string; isError: boolean } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -120,7 +126,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
   }, []);
 
   // ----------------------------------------------------
-  // Canvas Mini-Map & Bezier Path Visualizer
+  // Canvas Mini-Map & Dynamic Bezier Path Visualizer
   // ----------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -138,14 +144,14 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
       const scaleX = width / 1920;
       const scaleY = height / 1080;
 
-      // 1. Dark Cyber Background & Grid
-      ctx.fillStyle = '#0a0c16';
+      // 1. Dark Cyber Background & Precision Grid
+      ctx.fillStyle = '#080a14';
       ctx.fillRect(0, 0, width, height);
 
       // Grid lines
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
       ctx.lineWidth = 1;
-      const stepGrid = 40;
+      const stepGrid = 32;
       for (let x = 0; x < width; x += stepGrid) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -176,7 +182,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
             sequence.bezierSmoothness
           );
 
-          // Path Gradient
+          // Path Gradient & Pulse
           const isCurrentSegment = activeWaypointIndex === i;
           const gradient = ctx.createLinearGradient(startPt.x, startPt.y, endPt.x, endPt.y);
 
@@ -185,15 +191,15 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
             gradient.addColorStop(0.5, '#7f00ff');
             gradient.addColorStop(1, '#00f5a0');
             ctx.strokeStyle = gradient;
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 3.5;
             ctx.shadowColor = '#00f2fe';
-            ctx.shadowBlur = 12;
+            ctx.shadowBlur = 14;
           } else {
-            gradient.addColorStop(0, 'rgba(0, 242, 254, 0.3)');
-            gradient.addColorStop(1, 'rgba(127, 0, 255, 0.3)');
+            gradient.addColorStop(0, 'rgba(0, 242, 254, 0.35)');
+            gradient.addColorStop(1, 'rgba(127, 0, 255, 0.35)');
             ctx.strokeStyle = gradient;
             ctx.lineWidth = 1.8;
-            ctx.setLineDash([4, 4]);
+            ctx.setLineDash([5, 5]);
             ctx.shadowBlur = 0;
           }
 
@@ -206,81 +212,87 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
         }
       }
 
-      // 3. Render Waypoint Pins & Jitter Halos
+      // 3. Render Waypoint Pins, Jitter Halos & Hover States
       sequence.waypoints.forEach((wp, idx) => {
         const cx = wp.x * scaleX;
         const cy = wp.y * scaleY;
         const isSelected = wp.id === selectedWaypointId;
+        const isHovered = wp.id === hoveredWaypointId;
+        const isBeingDragged = wp.id === draggedWaypointId;
         const isActive = activeWaypointIndex === idx && engineState === 'running';
 
-        if (!wp.enabled) {
-          ctx.globalAlpha = 0.35;
-        } else {
-          ctx.globalAlpha = 1.0;
-        }
+        ctx.globalAlpha = wp.enabled ? 1.0 : 0.35;
 
         // Jitter halo
         if (wp.jitterRadius > 0) {
-          const jitterCanvasR = Math.max(4, wp.jitterRadius * scaleX * 2.5);
+          const jitterCanvasR = Math.max(5, wp.jitterRadius * scaleX * 3.0);
           ctx.beginPath();
           ctx.arc(cx, cy, jitterCanvasR, 0, Math.PI * 2);
           ctx.fillStyle = isSelected
-            ? 'rgba(0, 242, 254, 0.15)'
+            ? 'rgba(0, 242, 254, 0.18)'
             : 'rgba(255, 255, 255, 0.05)';
           ctx.fill();
           ctx.strokeStyle = isSelected
-            ? 'rgba(0, 242, 254, 0.4)'
-            : 'rgba(255, 255, 255, 0.1)';
+            ? 'rgba(0, 242, 254, 0.5)'
+            : 'rgba(255, 255, 255, 0.12)';
           ctx.lineWidth = 1;
           ctx.stroke();
         }
 
-        // Pin base glow
+        // Active pulsing ring
         if (isActive) {
+          const pulse = (Date.now() % 1000) / 1000;
           ctx.beginPath();
-          ctx.arc(cx, cy, 18, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(0, 242, 254, 0.25)';
-          ctx.fill();
+          ctx.arc(cx, cy, 14 + pulse * 10, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(0, 242, 254, ${1 - pulse})`;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
           ctx.shadowColor = '#00f2fe';
           ctx.shadowBlur = 20;
         }
 
-        // Pin circle
+        // Pin Outer Circle
+        const pinRadius = isBeingDragged ? 14 : isSelected || isHovered ? 12 : 9.5;
         ctx.beginPath();
-        ctx.arc(cx, cy, isSelected ? 12 : 9, 0, Math.PI * 2);
+        ctx.arc(cx, cy, pinRadius, 0, Math.PI * 2);
         ctx.fillStyle = isActive
           ? '#00f2fe'
+          : isBeingDragged
+          ? '#00f5a0'
           : isSelected
           ? '#7f00ff'
-          : '#1a1e36';
+          : isHovered
+          ? '#222842'
+          : '#131728';
         ctx.fill();
 
-        ctx.strokeStyle = isSelected || isActive ? '#ffffff' : 'rgba(0, 242, 254, 0.6)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = isSelected || isBeingDragged || isActive ? '#ffffff' : 'rgba(0, 242, 254, 0.6)';
+        ctx.lineWidth = isSelected || isBeingDragged ? 2.5 : 1.5;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
         // Pin Number Label
-        ctx.fillStyle = isSelected || isActive ? '#000000' : '#ffffff';
+        ctx.fillStyle = isSelected || isActive || isBeingDragged ? '#000000' : '#ffffff';
         ctx.font = 'bold 9px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${idx + 1}`, cx, cy);
 
         // Waypoint name tag above
-        ctx.fillStyle = isSelected ? '#00f2fe' : 'rgba(255, 255, 255, 0.6)';
-        ctx.font = '500 8px "Plus Jakarta Sans", sans-serif';
-        ctx.fillText(wp.name, cx, cy - 16);
+        ctx.fillStyle = isSelected ? '#00f2fe' : isHovered ? '#ffffff' : 'rgba(255, 255, 255, 0.65)';
+        ctx.font = '600 8.5px "Plus Jakarta Sans", sans-serif';
+        ctx.fillText(wp.name, cx, cy - 17);
       });
 
-      // 4. Render Live Virtual Animated Cursor
+      // 4. Render Live Animated Virtual Cursor
       if (engineState === 'running' || engineState === 'stepping') {
         const curX = virtualCursor.x * scaleX;
         const curY = virtualCursor.y * scaleY;
 
         ctx.globalAlpha = 1.0;
         ctx.shadowColor = '#00f5a0';
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 16;
 
         ctx.beginPath();
         ctx.arc(curX, curY, 6, 0, Math.PI * 2);
@@ -288,14 +300,13 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
         ctx.fill();
 
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // Ping ripple
-        const ripple = (Date.now() % 1000) / 1000;
+        const ripple = (Date.now() % 800) / 800;
         ctx.beginPath();
-        ctx.arc(curX, curY, 6 + ripple * 14, 0, Math.PI * 2);
+        ctx.arc(curX, curY, 6 + ripple * 16, 0, Math.PI * 2);
         ctx.strokeStyle = `rgba(0, 245, 160, ${1 - ripple})`;
         ctx.lineWidth = 1.5;
         ctx.stroke();
@@ -313,17 +324,19 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
   }, [
     sequence,
     selectedWaypointId,
+    hoveredWaypointId,
+    draggedWaypointId,
     activeWaypointIndex,
     virtualCursor,
     engineState,
   ]);
 
   // ----------------------------------------------------
-  // Canvas Click to Reposition / Add Waypoint
+  // Interactive Canvas Mouse Handlers (Click, Drag, Pick)
   // ----------------------------------------------------
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>): { screenX: number; screenY: number } => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return { screenX: 960, screenY: 540 };
 
     const rect = canvas.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -332,47 +345,95 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
     const scaleX = 1920 / canvas.width;
     const scaleY = 1080 / canvas.height;
 
-    const screenX = Math.round(clickX * scaleX);
-    const screenY = Math.round(clickY * scaleY);
+    return {
+      screenX: Math.max(0, Math.min(1920, Math.round(clickX * scaleX))),
+      screenY: Math.max(0, Math.min(1080, Math.round(clickY * scaleY))),
+    };
+  };
 
-    // If picking coordinate for selected waypoint
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { screenX, screenY } = getCanvasCoords(e);
+
+    // If in coordinate picker mode
     if (isPickingCoord && selectedWaypoint) {
       updateWaypoint(selectedWaypoint.id, { x: screenX, y: screenY });
       setIsPickingCoord(false);
       return;
     }
 
-    // Check if clicked close to an existing waypoint
+    // Check if clicked near an existing waypoint to start drag or select
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const scaleX = 1920 / canvas.width;
+
     const clickedWp = sequence.waypoints.find((w) => {
       const dist = Math.hypot(w.x - screenX, w.y - screenY);
-      return dist < 45;
+      return dist < 35 * (scaleX / 3);
     });
 
     if (clickedWp) {
       setSelectedWaypointId(clickedWp.id);
-    } else {
-      // Add new waypoint at clicked location
-      const newWp = createDefaultWaypoint(sequence.waypoints.length + 1, screenX, screenY);
-      setSequence((prev) => ({
-        ...prev,
-        waypoints: [...prev.waypoints, newWp],
-        updatedAt: Date.now(),
-      }));
-      setSelectedWaypointId(newWp.id);
+      setIsDraggingWaypoint(true);
+      setDraggedWaypointId(clickedWp.id);
     }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { screenX, screenY } = getCanvasCoords(e);
+    setMagnifierCoord({ x: screenX, y: screenY });
+
+    if (isDraggingWaypoint && draggedWaypointId) {
+      updateWaypoint(draggedWaypointId, { x: screenX, y: screenY });
+      return;
+    }
+
+    // Check hover
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const scaleX = 1920 / canvas.width;
 
-    const screenX = Math.round((mouseX * 1920) / canvas.width);
-    const screenY = Math.round((mouseY * 1080) / canvas.height);
+    const hovered = sequence.waypoints.find((w) => {
+      const dist = Math.hypot(w.x - screenX, w.y - screenY);
+      return dist < 30 * (scaleX / 3);
+    });
 
-    setMagnifierCoord({ x: screenX, y: screenY });
+    setHoveredWaypointId(hovered ? hovered.id : null);
+  };
+
+  const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isDraggingWaypoint) {
+      setIsDraggingWaypoint(false);
+      setDraggedWaypointId(null);
+      return;
+    }
+
+    // If it was a clean click not on an existing waypoint, add a new one
+    if (!isPickingCoord) {
+      const { screenX, screenY } = getCanvasCoords(e);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const scaleX = 1920 / canvas.width;
+
+      const isNearExisting = sequence.waypoints.some((w) => {
+        return Math.hypot(w.x - screenX, w.y - screenY) < 35 * (scaleX / 3);
+      });
+
+      if (!isNearExisting) {
+        const newWp = createDefaultWaypoint(sequence.waypoints.length + 1, screenX, screenY);
+        setSequence((prev) => ({
+          ...prev,
+          waypoints: [...prev.waypoints, newWp],
+          updatedAt: Date.now(),
+        }));
+        setSelectedWaypointId(newWp.id);
+      }
+    }
+  };
+
+  const handleCanvasMouseLeave = () => {
+    setIsDraggingWaypoint(false);
+    setDraggedWaypointId(null);
+    setHoveredWaypointId(null);
   };
 
   // ----------------------------------------------------
@@ -380,8 +441,8 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
   // ----------------------------------------------------
   const addWaypoint = () => {
     const lastWp = sequence.waypoints[sequence.waypoints.length - 1];
-    const newX = lastWp ? Math.min(1800, lastWp.x + 80) : 960;
-    const newY = lastWp ? Math.min(1000, lastWp.y + 60) : 540;
+    const newX = lastWp ? Math.min(1800, lastWp.x + 90) : 960;
+    const newY = lastWp ? Math.min(1000, lastWp.y + 70) : 540;
 
     const newWp = createDefaultWaypoint(sequence.waypoints.length + 1, newX, newY);
     setSequence((prev) => ({
@@ -410,8 +471,8 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
       ...wp,
       id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: `${wp.name} (Copy)`,
-      x: Math.min(1920, wp.x + 30),
-      y: Math.min(1080, wp.y + 30),
+      x: Math.min(1900, wp.x + 35),
+      y: Math.min(1050, wp.y + 35),
     };
     setSequence((prev) => ({
       ...prev,
@@ -442,6 +503,14 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
       waypoints: prev.waypoints.map((w) => (w.id === id ? { ...w, ...updates } : w)),
       updatedAt: Date.now(),
     }));
+  };
+
+  const adjustCoordinate = (id: string, axis: 'x' | 'y', delta: number) => {
+    const wp = sequence.waypoints.find((w) => w.id === id);
+    if (!wp) return;
+    const maxVal = axis === 'x' ? 1920 : 1080;
+    const newVal = Math.max(0, Math.min(maxVal, wp[axis] + delta));
+    updateWaypoint(id, { [axis]: newVal });
   };
 
   // ----------------------------------------------------
@@ -492,7 +561,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
   };
 
   // ----------------------------------------------------
-  // Profile & Save Handlers
+  // Profile & Schema-Safe Import / Export
   // ----------------------------------------------------
   const handleSaveProfile = () => {
     onSaveSequence?.(sequence);
@@ -501,10 +570,16 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
   };
 
   const handleExportJson = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(sequence, null, 2));
+    const exportBundle = {
+      ...sequence,
+      totalDurationEstimatedMs: estimatedDurationMs,
+      updatedAt: Date.now(),
+      version: '2026.1',
+    };
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportBundle, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `${sequence.name.toLowerCase().replace(/\s+/g, '_')}_macro.json`);
+    downloadAnchor.setAttribute('download', `${sequence.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_macro.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -517,14 +592,21 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
-        const parsed = JSON.parse(evt.target?.result as string) as MacroSequence;
-        if (parsed.waypoints && Array.isArray(parsed.waypoints)) {
-          setSequence(parsed);
-          setSelectedWaypointId(parsed.waypoints[0]?.id || null);
+        const raw = JSON.parse(evt.target?.result as string);
+        const { isValid, sequence: sanitized, errors } = validateAndSanitizeMacroSequence(raw);
+
+        setSequence(sanitized);
+        setSelectedWaypointId(sanitized.waypoints[0]?.id || null);
+
+        if (isValid) {
+          setImportNotification({ message: `Successfully loaded "${sanitized.name}" (${sanitized.waypoints.length} nodes)`, isError: false });
+        } else {
+          setImportNotification({ message: `Loaded with schema repairs: ${errors.join(', ')}`, isError: true });
         }
-      } catch (err) {
-        console.error('Failed to parse sequence JSON', err);
+      } catch {
+        setImportNotification({ message: 'Invalid JSON file format.', isError: true });
       }
+      setTimeout(() => setImportNotification(null), 4000);
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -539,7 +621,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
   return (
     <div className={cn('flex flex-col gap-5 w-full text-slate-100', className)}>
       {/* -------------------------------------------------- */}
-      {/* Header & Controls Toolbar */}
+      {/* Header & Master Controls Toolbar */}
       {/* -------------------------------------------------- */}
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-card border border-border shadow-glass backdrop-blur-xl">
         <div className="flex items-center gap-3">
@@ -554,15 +636,15 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                 onChange={(e) => setSequence((prev) => ({ ...prev, name: e.target.value }))}
                 className="text-lg font-bold bg-transparent border-b border-transparent hover:border-surface-300 focus:border-accent-cyan focus:outline-none px-1 py-0.5 rounded text-white"
               />
-              <span className="text-xs px-2 py-0.5 rounded-full bg-surface-200 border border-white/10 text-cyan-300 font-mono">
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-surface-200 border border-white/10 text-cyan-300 font-mono">
                 {sequence.waypoints.length} Nodes
               </span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-surface-200 border border-white/10 text-purple-300 font-mono">
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-surface-200 border border-white/10 text-purple-300 font-mono">
                 ~{(estimatedDurationMs / 1000).toFixed(1)}s / cycle
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Precision multi-point pathing with Bezier curve easing & humanized micro-variances
+              Precision multi-point pathing with dynamic Bézier curvature, draggable pins, and humanized jitter
             </p>
           </div>
         </div>
@@ -671,14 +753,14 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
           <button
             onClick={handleExportJson}
             className="p-2 rounded-xl bg-surface-100 hover:bg-surface-200 border border-border text-slate-300 transition-all"
-            title="Export JSON"
+            title="Export JSON Macro"
           >
             <Download className="w-4 h-4" />
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             className="p-2 rounded-xl bg-surface-100 hover:bg-surface-200 border border-border text-slate-300 transition-all"
-            title="Import JSON"
+            title="Import JSON Macro"
           >
             <Upload className="w-4 h-4" />
           </button>
@@ -691,6 +773,21 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
           />
         </div>
       </div>
+
+      {/* Notification Toast for Import/Save */}
+      {importNotification && (
+        <div
+          className={cn(
+            'flex items-center gap-2 p-3 rounded-xl border text-xs font-semibold animate-pulse',
+            importNotification.isError
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+              : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
+          )}
+        >
+          {importNotification.isError ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+          <span>{importNotification.message}</span>
+        </div>
+      )}
 
       {/* -------------------------------------------------- */}
       {/* Sequence Settings Strip */}
@@ -749,7 +846,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
         <div className="flex flex-col gap-1.5">
           <label className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
             <Zap className="w-3.5 h-3.5 text-amber-400" />
-            Speed: {sequence.speedMultiplier}x
+            Speed: {sequence.speedMultiplier.toFixed(1)}x
           </label>
           <input
             type="range"
@@ -809,11 +906,11 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                 : 'bg-surface-100 border-border text-slate-400'
             )}
           >
-            {sequence.humanizePaths ? 'Natural Bezier ON' : 'Direct Linear'}
+            {sequence.humanizePaths ? 'Natural Bézier ON' : 'Direct Linear'}
           </button>
         </div>
 
-        {/* Hotkey Indicator */}
+        {/* State Indicator */}
         <div className="flex flex-col gap-1.5">
           <label className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
             <Clock className="w-3.5 h-3.5 text-accent-blue" />
@@ -863,29 +960,47 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
               </div>
             )}
 
+            {isDraggingWaypoint && (
+              <div className="absolute top-3 right-3 z-10 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-xs font-bold backdrop-blur-md">
+                <Move className="w-4 h-4" />
+                <span>Dragging Pin Position</span>
+              </div>
+            )}
+
             {/* Canvas */}
             <canvas
               ref={canvasRef}
               width={640}
               height={360}
-              onClick={handleCanvasClick}
+              onMouseDown={handleCanvasMouseDown}
               onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
+              onMouseLeave={handleCanvasMouseLeave}
               className={cn(
-                'w-full h-auto aspect-video cursor-crosshair block transition-opacity',
-                isPickingCoord && 'ring-2 ring-accent-cyan'
+                'w-full h-auto aspect-video block transition-opacity select-none',
+                isDraggingWaypoint
+                  ? 'cursor-grabbing ring-2 ring-emerald-400'
+                  : isPickingCoord
+                  ? 'cursor-crosshair ring-2 ring-accent-cyan'
+                  : hoveredWaypointId
+                  ? 'cursor-grab'
+                  : 'cursor-crosshair'
               )}
             />
 
-            {/* Bottom mini-bar with status */}
+            {/* Bottom mini-bar with status and guide */}
             <div className="p-3 bg-card/90 border-t border-border flex items-center justify-between text-xs text-slate-400">
               <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-accent-cyan" />
-                  <span>Target Pins</span>
+                  <span>Draggable Pins</span>
                 </span>
                 <span className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                  <span>Live Cursor</span>
+                  <span>Animated Cursor</span>
+                </span>
+                <span className="text-[11px] text-slate-500 hidden sm:inline">
+                  (Drag pins to reposition, click empty space to add)
                 </span>
               </div>
               <button
@@ -893,7 +1008,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                 className="flex items-center gap-1 text-accent-cyan hover:text-cyan-300 font-semibold transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Add Waypoint Pin</span>
+                <span>Add Node</span>
               </button>
             </div>
           </div>
@@ -906,7 +1021,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                 Sequence Execution Timeline
               </span>
               <span className="font-mono text-slate-400">
-                Cycle Progress: {activeWaypointIndex + 1} / {sequence.waypoints.length}
+                Cycle Progress: {activeWaypointIndex >= 0 ? activeWaypointIndex + 1 : 0} / {sequence.waypoints.length}
               </span>
             </div>
 
@@ -933,7 +1048,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                     </span>
                     <span>{wp.name}</span>
                     <span className="text-[10px] text-slate-500 font-mono">
-                      {wp.delayBeforeMs + wp.delayAfterMs}ms
+                      {Math.round((wp.delayBeforeMs + wp.delayAfterMs) / sequence.speedMultiplier)}ms
                     </span>
                   </button>
                 );
@@ -942,13 +1057,13 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
           </div>
         </div>
 
-        {/* Waypoints List & Granular Editor (Right 5 Cols) */}
+        {/* Waypoints List & Granular Inspector (Right 5 Cols) */}
         <div className="lg:col-span-5 flex flex-col gap-4">
           {/* Waypoints Header & Quick Actions */}
           <div className="p-4 rounded-2xl bg-card border border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Sliders className="w-4 h-4 text-accent-cyan" />
-              <h3 className="font-bold text-sm text-slate-100">Waypoint Nodes</h3>
+              <h3 className="font-bold text-sm text-slate-100">Waypoint Nodes ({sequence.waypoints.length})</h3>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -962,7 +1077,7 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
           </div>
 
           {/* Waypoints Table / List */}
-          <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2 max-h-[290px] overflow-y-auto pr-1">
             {sequence.waypoints.map((wp, index) => {
               const isSelected = selectedWaypointId === wp.id;
               const isActive = activeWaypointIndex === index && engineState === 'running';
@@ -1062,18 +1177,20 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                     Node Inspector: <span className="text-accent-cyan">{selectedWaypoint.name}</span>
                   </h4>
                 </div>
-                <button
-                  onClick={() => setIsPickingCoord(!isPickingCoord)}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold border transition-all',
-                    isPickingCoord
-                      ? 'bg-accent-cyan text-slate-950 border-accent-cyan animate-pulse'
-                      : 'bg-surface-100 hover:bg-surface-200 border-border text-cyan-300'
-                  )}
-                >
-                  <Crosshair className="w-3.5 h-3.5" />
-                  <span>{isPickingCoord ? 'Click Canvas...' : 'Pick Coords'}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsPickingCoord(!isPickingCoord)}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold border transition-all',
+                      isPickingCoord
+                        ? 'bg-accent-cyan text-slate-950 border-accent-cyan animate-pulse'
+                        : 'bg-surface-100 hover:bg-surface-200 border-border text-cyan-300'
+                    )}
+                  >
+                    <Crosshair className="w-3.5 h-3.5" />
+                    <span>{isPickingCoord ? 'Click Canvas...' : 'Pick Coords'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Coordinates & Action Form */}
@@ -1091,9 +1208,25 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                   />
                 </div>
 
-                {/* X Coordinate */}
+                {/* X Coordinate with Step Adjust Buttons */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-[11px] text-slate-400 font-medium">X Coordinate (px)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] text-slate-400 font-medium">X (px)</label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => adjustCoordinate(selectedWaypoint.id, 'x', -10)}
+                        className="px-1 py-0.5 rounded bg-surface-200 hover:bg-surface-300 text-[10px] text-slate-300"
+                      >
+                        -10
+                      </button>
+                      <button
+                        onClick={() => adjustCoordinate(selectedWaypoint.id, 'x', 10)}
+                        className="px-1 py-0.5 rounded bg-surface-200 hover:bg-surface-300 text-[10px] text-slate-300"
+                      >
+                        +10
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type="number"
                     min="0"
@@ -1108,9 +1241,25 @@ export const MacroSequencer: React.FC<MacroSequencerProps> = ({
                   />
                 </div>
 
-                {/* Y Coordinate */}
+                {/* Y Coordinate with Step Adjust Buttons */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-[11px] text-slate-400 font-medium">Y Coordinate (px)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] text-slate-400 font-medium">Y (px)</label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => adjustCoordinate(selectedWaypoint.id, 'y', -10)}
+                        className="px-1 py-0.5 rounded bg-surface-200 hover:bg-surface-300 text-[10px] text-slate-300"
+                      >
+                        -10
+                      </button>
+                      <button
+                        onClick={() => adjustCoordinate(selectedWaypoint.id, 'y', 10)}
+                        className="px-1 py-0.5 rounded bg-surface-200 hover:bg-surface-300 text-[10px] text-slate-300"
+                      >
+                        +10
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type="number"
                     min="0"

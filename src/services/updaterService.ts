@@ -590,7 +590,7 @@ export class UpdaterService {
   }
 
   /**
-   * Execute installer / restart application
+   * Execute in-app update installation and smoothly restart application
    */
   public async installAndRestart(): Promise<void> {
     if (this.status !== 'downloaded') {
@@ -599,13 +599,17 @@ export class UpdaterService {
 
     try {
       const electron = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
-      if (electron && typeof electron.openExternal === 'function' && this.lastReleaseInfo?.htmlUrl) {
-        await electron.openExternal(this.lastReleaseInfo.htmlUrl);
-      } else if (typeof window !== 'undefined' && this.lastReleaseInfo?.htmlUrl) {
-        window.open(this.lastReleaseInfo.htmlUrl, '_blank');
+      if (electron && typeof electron.installAndRestart === 'function') {
+        await electron.installAndRestart();
+      } else if (typeof window !== 'undefined') {
+        // Browser/preview mode: smooth in-app state refresh without navigating away
+        window.location.reload();
       }
     } catch (err: any) {
-      console.error('[UpdaterService] Install trigger failed:', err);
+      console.error('[UpdaterService] In-app restart failed:', err);
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
     }
   }
 }

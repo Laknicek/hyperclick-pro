@@ -138,6 +138,8 @@ npm run build:electron
 | `npm run dev` | **Vite Only** | Starts Vite frontend dev server at `http://localhost:5173`. |
 | `npm run build` | **Frontend Build** | Type-checks and compiles React app into `/dist`. |
 | `npm run build:electron` | **Electron Build** | Compiles `electron/**/*.ts` to `dist-electron/` using `tsconfig.electron.json`. |
+| `npm run generate:icons` | **Icon Pipeline** | Generates SVG, PNGs, and multi-resolution Windows `.ico` assets. |
+| `npm run build:all` | **Master Pipeline** | Executes full end-to-end build, packaging, checksum, and manifest generation. |
 | `npm run dist` | **Production Installer** | Compiles full app and builds NSIS installer + Portable `.exe` into `/release`. |
 | `npm run dist:portable` | **Portable Only** | Packages standalone single-file portable executable. |
 | `npm run dist:dir` | **Unpacked Dir** | Outputs unpacked Windows binaries for rapid inspection and debugging. |

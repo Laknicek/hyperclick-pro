@@ -173,6 +173,8 @@ export interface IElectronAPI {
   // Window & Overlays
   toggleOverlay: (show?: boolean) => Promise<boolean>;
   toggleMiniHud: (show?: boolean) => Promise<boolean>;
+  setAlwaysOnTop: (enabled: boolean) => Promise<boolean>;
+  isAlwaysOnTop: () => Promise<boolean>;
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;
@@ -183,7 +185,9 @@ export interface IElectronAPI {
   saveSettings: (settings: Partial<AppSettings>) => Promise<boolean>;
   getSystemInfo: () => Promise<SystemInfo>;
   getVersion: () => Promise<string>;
-  checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; releaseNotes?: string }>;
+  checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; releaseNotes?: string; downloadUrl?: string }>;
+  downloadUpdate: (options?: { packageType?: 'nsis' | 'portable' }) => Promise<{ success: boolean; progress?: number; error?: string }>;
+  installAndRestart: () => Promise<void>;
   openExternal: (url: string) => Promise<void>;
 
   // Sound Feedback
@@ -203,6 +207,8 @@ export interface IElectronAPI {
   onCoordinatePicked: (callback: (coords: CoordinateResult) => void) => () => void;
   onOverlayStateChanged: (callback: (visible: boolean) => void) => () => void;
   onMiniHudStateChanged: (callback: (visible: boolean) => void) => () => void;
+  onAlwaysOnTopChanged: (callback: (enabled: boolean) => void) => () => void;
+  onUpdateDownloadProgress?: (callback: (progress: { transferredBytes: number; totalBytes: number; percent: number; speedBytesPerSec: number }) => void) => () => void;
 }
 
 declare global {

@@ -64,6 +64,7 @@ class HyperClickApplication {
   private settingsFilePath: string;
   private lastKnownConfig: ClickConfig | null = null;
   private isPickingCoordinate = false;
+  private isShuttingDown = false;
 
   constructor() {
     this.engine = new NativeClickerEngine();
@@ -81,8 +82,9 @@ class HyperClickApplication {
     }
 
     app.on('second-instance', () => {
-      if (this.mainWindow) {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         if (this.mainWindow.isMinimized()) this.mainWindow.restore();
+        this.mainWindow.show();
         this.mainWindow.focus();
       }
     });
@@ -102,6 +104,11 @@ class HyperClickApplication {
       if (BrowserWindow.getAllWindows().length === 0) {
         this.createMainWindow();
       }
+    });
+
+    app.on('before-quit', () => {
+      this.isShuttingDown = true;
+      this.engine.destroy();
     });
 
     app.on('will-quit', () => {
@@ -140,17 +147,73 @@ class HyperClickApplication {
   }
 
   /**
-   * Creates the primary dashboard window.
+   * Calculates 16:9 landscape resolution based on user monitor tier:
+   * - 4K (height >= 2160) -> 1440p (2560x1440)
+   * - 1440p (height >= 1440) -> 1080p (1920x1080)
+   * - 1080p (height >= 1080) -> 720p (1280x720)
+   * - Smaller displays -> 960x540
+   * Centered on primary screen and clamped within 85% of workArea to ensure perfect windowed mode.
+   */
+  private calculateInitial16x9WindowBounds(): { width: number; height: number; x: number; y: number } {
+    try {
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width: workWidth, height: workHeight, x: workX, y: workY } = primaryDisplay.workArea;
+      const rawHeight = primaryDisplay.bounds.height;
+
+      let targetWidth = 1280;
+      let targetHeight = 720;
+
+      if (rawHeight >= 2160) {
+        // 4K Monitor -> open in 1440p (2560x1440)
+        targetWidth = 2560;
+        targetHeight = 1440;
+      } else if (rawHeight >= 1440) {
+        // 1440p Monitor -> open in 1080p (1920x1080)
+        targetWidth = 1920;
+        targetHeight = 1080;
+      } else if (rawHeight >= 1080) {
+        // 1080p Monitor -> open in 720p (1280x720)
+        targetWidth = 1280;
+        targetHeight = 720;
+      } else {
+        targetWidth = 960;
+        targetHeight = 540;
+      }
+
+      // Ensure window doesn't exceed 85% of usable screen area while preserving 16:9
+      const maxWidth = Math.floor(workWidth * 0.88);
+      const maxHeight = Math.floor(workHeight * 0.88);
+
+      if (targetWidth > maxWidth || targetHeight > maxHeight) {
+        const scale = Math.min(maxWidth / targetWidth, maxHeight / targetHeight);
+        targetHeight = Math.max(540, Math.floor((targetHeight * scale) / 9) * 9);
+        targetWidth = Math.floor((targetHeight * 16) / 9);
+      }
+
+      const x = Math.max(workX, Math.floor(workX + (workWidth - targetWidth) / 2));
+      const y = Math.max(workY, Math.floor(workY + (workHeight - targetHeight) / 2));
+
+      return { width: targetWidth, height: targetHeight, x, y };
+    } catch {
+      return { width: 1280, height: 720, x: 100, y: 100 };
+    }
+  }
+
+  /**
+   * Creates the primary dashboard window in 16:9 landscape mode.
    */
   private createMainWindow(): void {
     const isDev = !app.isPackaged;
     const preloadPath = path.join(__dirname, 'preload.js');
+    const bounds = this.calculateInitial16x9WindowBounds();
 
     this.mainWindow = new BrowserWindow({
-      width: 1040,
-      height: 730,
-      minWidth: 920,
-      minHeight: 640,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      minWidth: 960,
+      minHeight: 540,
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
@@ -182,8 +245,10 @@ class HyperClickApplication {
 
     this.mainWindow.on('closed', () => {
       this.mainWindow = null;
-      if (this.miniHudWindow) this.miniHudWindow.close();
-      if (this.overlayWindow) this.overlayWindow.close();
+      if (!this.isShuttingDown) {
+        if (this.miniHudWindow && !this.miniHudWindow.isDestroyed()) this.miniHudWindow.close();
+        if (this.overlayWindow && !this.overlayWindow.isDestroyed()) this.overlayWindow.close();
+      }
     });
   }
 
@@ -289,8 +354,10 @@ class HyperClickApplication {
         {
           label: 'Show HyperClick Pro',
           click: () => {
-            this.mainWindow?.show();
-            this.mainWindow?.focus();
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.show();
+              this.mainWindow.focus();
+            }
           },
         },
         {
@@ -313,7 +380,9 @@ class HyperClickApplication {
       this.tray.setToolTip('HyperClick Pro 2026');
       this.tray.setContextMenu(contextMenu);
       this.tray.on('double-click', () => {
-        this.mainWindow?.show();
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.show();
+        }
       });
     } catch {
       // System tray optional in some test environments
@@ -324,69 +393,73 @@ class HyperClickApplication {
    * Registers global hotkeys (F6, F7, F8, F9, Escape, and custom).
    */
   public registerGlobalHotkeys(): void {
-    globalShortcut.unregisterAll();
+    try {
+      globalShortcut.unregisterAll();
 
-    const { hotkeys } = this.settings;
+      const { hotkeys } = this.settings;
 
-    // Toggle Clicker (Default: F6)
-    if (hotkeys.toggleClicker) {
-      try {
-        globalShortcut.register(hotkeys.toggleClicker, () => {
-          this.broadcast('hotkey-triggered', 'toggle-clicker');
-          this.toggleClicker();
-        });
-      } catch (err) {
-        console.warn(`Failed to register hotkey ${hotkeys.toggleClicker}:`, err);
+      // Toggle Clicker (Default: F6)
+      if (hotkeys.toggleClicker) {
+        try {
+          globalShortcut.register(hotkeys.toggleClicker, () => {
+            this.broadcast('hotkey-triggered', 'toggle-clicker');
+            this.toggleClicker();
+          });
+        } catch (err) {
+          console.warn(`Failed to register hotkey ${hotkeys.toggleClicker}:`, err);
+        }
       }
-    }
 
-    // Pick Coordinates (Default: F7)
-    if (hotkeys.pickCoordinates) {
-      try {
-        globalShortcut.register(hotkeys.pickCoordinates, async () => {
-          this.broadcast('hotkey-triggered', 'pick-coordinates');
-          const coords = await this.captureCursorCoordinate();
-          this.broadcast('coordinate-picked', coords);
-        });
-      } catch (err) {
-        console.warn(`Failed to register hotkey ${hotkeys.pickCoordinates}:`, err);
+      // Pick Coordinates (Default: F7)
+      if (hotkeys.pickCoordinates) {
+        try {
+          globalShortcut.register(hotkeys.pickCoordinates, async () => {
+            this.broadcast('hotkey-triggered', 'pick-coordinates');
+            const coords = await this.captureCursorCoordinate();
+            this.broadcast('coordinate-picked', coords);
+          });
+        } catch (err) {
+          console.warn(`Failed to register hotkey ${hotkeys.pickCoordinates}:`, err);
+        }
       }
-    }
 
-    // Toggle Mini HUD (Default: F8)
-    if (hotkeys.toggleMiniHud) {
-      try {
-        globalShortcut.register(hotkeys.toggleMiniHud, () => {
-          this.broadcast('hotkey-triggered', 'toggle-mini-hud');
-          this.toggleMiniHud();
-        });
-      } catch (err) {
-        console.warn(`Failed to register hotkey ${hotkeys.toggleMiniHud}:`, err);
+      // Toggle Mini HUD (Default: F8)
+      if (hotkeys.toggleMiniHud) {
+        try {
+          globalShortcut.register(hotkeys.toggleMiniHud, () => {
+            this.broadcast('hotkey-triggered', 'toggle-mini-hud');
+            this.toggleMiniHud();
+          });
+        } catch (err) {
+          console.warn(`Failed to register hotkey ${hotkeys.toggleMiniHud}:`, err);
+        }
       }
-    }
 
-    // Toggle Overlay (Default: F9)
-    if (hotkeys.toggleOverlay) {
-      try {
-        globalShortcut.register(hotkeys.toggleOverlay, () => {
-          this.broadcast('hotkey-triggered', 'toggle-overlay');
-          this.toggleOverlay();
-        });
-      } catch (err) {
-        console.warn(`Failed to register hotkey ${hotkeys.toggleOverlay}:`, err);
+      // Toggle Overlay (Default: F9)
+      if (hotkeys.toggleOverlay) {
+        try {
+          globalShortcut.register(hotkeys.toggleOverlay, () => {
+            this.broadcast('hotkey-triggered', 'toggle-overlay');
+            this.toggleOverlay();
+          });
+        } catch (err) {
+          console.warn(`Failed to register hotkey ${hotkeys.toggleOverlay}:`, err);
+        }
       }
-    }
 
-    // Emergency Stop (Default: Escape)
-    if (hotkeys.emergencyStop) {
-      try {
-        globalShortcut.register(hotkeys.emergencyStop, () => {
-          this.broadcast('hotkey-triggered', 'emergency-stop');
-          this.engine.stop();
-        });
-      } catch (err) {
-        console.warn(`Failed to register hotkey ${hotkeys.emergencyStop}:`, err);
+      // Emergency Stop (Default: Escape)
+      if (hotkeys.emergencyStop) {
+        try {
+          globalShortcut.register(hotkeys.emergencyStop, () => {
+            this.broadcast('hotkey-triggered', 'emergency-stop');
+            this.engine.stop();
+          });
+        } catch (err) {
+          console.warn(`Failed to register hotkey ${hotkeys.emergencyStop}:`, err);
+        }
       }
+    } catch (err) {
+      console.warn('Error in registerGlobalHotkeys:', err);
     }
   }
 
@@ -394,45 +467,49 @@ class HyperClickApplication {
    * Toggles the clicking engine state.
    */
   private async toggleClicker(): Promise<void> {
-    const status = this.engine.getStatus();
-    if (status.isRunning) {
-      await this.engine.stop();
-    } else {
-      if (this.lastKnownConfig) {
-        await this.engine.start(this.lastKnownConfig);
+    try {
+      const status = this.engine.getStatus();
+      if (status.isRunning) {
+        await this.engine.stop();
       } else {
-        // Fallback default config
-        const fallbackConfig: ClickConfig = {
-          clickType: 'left',
-          cps: 20,
-          clickIntervalMs: 50,
-          repeatMode: 'infinite',
-          repeatCount: 100,
-          repeatDurationMs: 10000,
-          locationMode: 'current',
-          fixedX: 0,
-          fixedY: 0,
-          waypoints: [],
-          waypointLoopMode: 'sequential',
-          waypointRepeatCount: 0,
-          humanizer: {
-            enabled: false,
-            jitterRadius: 0,
-            timingVariancePercent: 0,
-            fatigueEnabled: false,
-            fatigueFactor: 0.2,
-            microBreaks: false,
-            microBreakIntervalSec: 30,
-            bezierMovement: false,
-            movementSpeed: 5,
-            distribution: 'gaussian',
-          },
-          audioFeedback: false,
-          soundTheme: 'cyber_click',
-          soundVolume: 80,
-        };
-        await this.engine.start(fallbackConfig);
+        if (this.lastKnownConfig) {
+          await this.engine.start(this.lastKnownConfig);
+        } else {
+          // Fallback default config
+          const fallbackConfig: ClickConfig = {
+            clickType: 'left',
+            cps: 20,
+            clickIntervalMs: 50,
+            repeatMode: 'infinite',
+            repeatCount: 100,
+            repeatDurationMs: 10000,
+            locationMode: 'current',
+            fixedX: 0,
+            fixedY: 0,
+            waypoints: [],
+            waypointLoopMode: 'sequential',
+            waypointRepeatCount: 0,
+            humanizer: {
+              enabled: false,
+              jitterRadius: 0,
+              timingVariancePercent: 0,
+              fatigueEnabled: false,
+              fatigueFactor: 0.2,
+              microBreaks: false,
+              microBreakIntervalSec: 30,
+              bezierMovement: false,
+              movementSpeed: 5,
+              distribution: 'gaussian',
+            },
+            audioFeedback: false,
+            soundTheme: 'cyber_click',
+            soundVolume: 80,
+          };
+          await this.engine.start(fallbackConfig);
+        }
       }
+    } catch (err) {
+      console.error('[HyperClick] Error in toggleClicker:', err);
     }
   }
 
@@ -454,7 +531,7 @@ class HyperClickApplication {
    * Toggles Mini HUD visibility.
    */
   private toggleMiniHud(show?: boolean): boolean {
-    if (!this.miniHudWindow) {
+    if (!this.miniHudWindow || this.miniHudWindow.isDestroyed()) {
       this.createMiniHudWindow();
     }
 
@@ -473,7 +550,7 @@ class HyperClickApplication {
    * Toggles Waypoint Overlay visibility.
    */
   private toggleOverlay(show?: boolean): boolean {
-    if (!this.overlayWindow) {
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) {
       this.createOverlayWindow();
     }
 
@@ -489,17 +566,29 @@ class HyperClickApplication {
   }
 
   /**
-   * Broadcasts an IPC message to all active windows.
+   * Broadcasts an IPC message to all active windows safely.
    */
   private broadcast(channel: string, ...args: any[]): void {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send(channel, ...args);
+      try {
+        this.mainWindow.webContents.send(channel, ...args);
+      } catch {
+        // ignore
+      }
     }
     if (this.miniHudWindow && !this.miniHudWindow.isDestroyed()) {
-      this.miniHudWindow.webContents.send(channel, ...args);
+      try {
+        this.miniHudWindow.webContents.send(channel, ...args);
+      } catch {
+        // ignore
+      }
     }
     if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-      this.overlayWindow.webContents.send(channel, ...args);
+      try {
+        this.overlayWindow.webContents.send(channel, ...args);
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -518,63 +607,90 @@ class HyperClickApplication {
   }
 
   /**
-   * Sets up all IPC message handlers from renderer.
+   * Sets up all IPC message handlers from renderer with full alias support and error guards.
    */
   private setupIpcHandlers(): void {
-    // Start Clicker
-    ipcMain.handle('clicker:start', async (_event, config: ClickConfig) => {
+    const handleSafe = (channel: string, handler: (event: any, ...args: any[]) => Promise<any> | any) => {
+      ipcMain.handle(channel, async (event, ...args) => {
+        try {
+          return await handler(event, ...args);
+        } catch (err: any) {
+          console.error(`[HyperClick IPC Error on ${channel}]:`, err);
+          return { success: false, error: err?.message || 'Unknown IPC Error' };
+        }
+      });
+    };
+
+    // Start Clicker (support clicker:start and start-clicker)
+    const handleStart = async (_event: any, config: ClickConfig) => {
       this.lastKnownConfig = config;
       return await this.engine.start(config);
-    });
+    };
+    handleSafe('clicker:start', handleStart);
+    handleSafe('start-clicker', handleStart);
 
-    // Stop Clicker
-    ipcMain.handle('clicker:stop', async () => {
+    // Stop Clicker (support clicker:stop and stop-clicker)
+    const handleStop = async () => {
       return await this.engine.stop();
-    });
+    };
+    handleSafe('clicker:stop', handleStop);
+    handleSafe('stop-clicker', handleStop);
 
-    // Get Status
-    ipcMain.handle('clicker:get-status', async () => {
+    // Get Status (support clicker:get-status, clicker:status, get-status)
+    const handleGetStatus = async () => {
       return this.engine.getStatus();
-    });
+    };
+    handleSafe('clicker:get-status', handleGetStatus);
+    handleSafe('clicker:status', handleGetStatus);
+    handleSafe('get-status', handleGetStatus);
 
-    // Pick Coordinates
-    ipcMain.handle('coordinate:pick', async () => {
+    // Pick Coordinates (support coordinate:pick, clicker:pick-coords, pick-coordinates)
+    const handlePickCoords = async () => {
       this.isPickingCoordinate = true;
       const coords = await this.captureCursorCoordinate();
       this.isPickingCoordinate = false;
       this.broadcast('coordinate-picked', coords);
       return coords;
-    });
+    };
+    handleSafe('coordinate:pick', handlePickCoords);
+    handleSafe('clicker:pick-coords', handlePickCoords);
+    handleSafe('pick-coordinates', handlePickCoords);
 
     // Cancel Coordinate Picker
-    ipcMain.handle('coordinate:cancel', async () => {
+    handleSafe('coordinate:cancel', async () => {
       this.isPickingCoordinate = false;
     });
 
     // Update Waypoints
-    ipcMain.handle('waypoints:update', async (_event, waypoints: ClickWaypoint[]) => {
+    handleSafe('waypoints:update', async (_event: any, waypoints: ClickWaypoint[]) => {
       if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
         this.overlayWindow.webContents.send('waypoints-synced', waypoints);
       }
+      return true;
     });
 
     // Toggle Overlay
-    ipcMain.handle('overlay:toggle', async (_event, show?: boolean) => {
+    const handleToggleOverlay = async (_event: any, show?: boolean) => {
       return this.toggleOverlay(show);
-    });
+    };
+    handleSafe('overlay:toggle', handleToggleOverlay);
+    handleSafe('toggle-overlay', handleToggleOverlay);
 
     // Toggle Mini HUD
-    ipcMain.handle('mini-hud:toggle', async (_event, show?: boolean) => {
+    const handleToggleMiniHud = async (_event: any, show?: boolean) => {
       return this.toggleMiniHud(show);
-    });
+    };
+    handleSafe('mini-hud:toggle', handleToggleMiniHud);
+    handleSafe('toggle-mini-hud', handleToggleMiniHud);
 
     // Window Controls
-    ipcMain.handle('window:minimize', async (event) => {
+    handleSafe('window:minimize', async (event: any) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       win?.minimize();
+      return true;
     });
 
-    ipcMain.handle('window:maximize', async (event) => {
+    handleSafe('window:maximize', async (event: any) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (win) {
         if (win.isMaximized()) {
@@ -583,50 +699,55 @@ class HyperClickApplication {
           win.maximize();
         }
       }
+      return true;
     });
 
-    ipcMain.handle('window:close', async (event) => {
+    handleSafe('window:close', async (event: any) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (win === this.mainWindow) {
         app.quit();
       } else {
         win?.hide();
       }
+      return true;
     });
 
     // Window Drag
-    ipcMain.handle('window:drag', async (event, { deltaX, deltaY }: { deltaX: number; deltaY: number }) => {
+    handleSafe('window:drag', async (event: any, payload: any) => {
       const win = BrowserWindow.fromWebContents(event.sender);
-      if (win) {
+      if (win && !win.isDestroyed()) {
+        const deltaX = typeof payload?.deltaX === 'number' ? payload.deltaX : (typeof payload?.x === 'number' ? payload.x : 0);
+        const deltaY = typeof payload?.deltaY === 'number' ? payload.deltaY : (typeof payload?.y === 'number' ? payload.y : 0);
         const [x, y] = win.getPosition();
         win.setPosition(Math.round(x + deltaX), Math.round(y + deltaY));
       }
+      return true;
     });
 
     // Settings
-    ipcMain.handle('settings:get', async () => {
-      return this.settings;
-    });
+    const handleGetSettings = async () => this.settings;
+    handleSafe('settings:get', handleGetSettings);
+    handleSafe('get-settings', handleGetSettings);
 
-    ipcMain.handle('settings:save', async (_event, newSettings: Partial<AppSettings>) => {
+    const handleSaveSettings = async (_event: any, newSettings: Partial<AppSettings>) => {
       this.settings = { ...this.settings, ...newSettings };
       this.saveSettingsToFile();
 
-      // Update alwaysOnTop if changed
-      if (newSettings.alwaysOnTop !== undefined && this.mainWindow) {
+      if (newSettings.alwaysOnTop !== undefined && this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.setAlwaysOnTop(this.settings.alwaysOnTop);
       }
 
-      // Re-register hotkeys in case bindings changed
       if (newSettings.hotkeys) {
         this.registerGlobalHotkeys();
       }
 
       return true;
-    });
+    };
+    handleSafe('settings:save', handleSaveSettings);
+    handleSafe('save-settings', handleSaveSettings);
 
     // System Info
-    ipcMain.handle('app:get-system-info', async (): Promise<SystemInfo> => {
+    handleSafe('app:get-system-info', async (): Promise<SystemInfo> => {
       const displays: DisplayInfo[] = screen.getAllDisplays().map((d) => ({
         id: d.id,
         bounds: d.bounds,
@@ -646,29 +767,79 @@ class HyperClickApplication {
     });
 
     // Version
-    ipcMain.handle('app:get-version', async () => {
-      return app.getVersion();
-    });
+    const handleGetVersion = async () => app.getVersion();
+    handleSafe('app:get-version', handleGetVersion);
+    handleSafe('get-version', handleGetVersion);
 
     // Update Check
-    ipcMain.handle('app:check-update', async () => {
-      return {
-        hasUpdate: false,
-        latestVersion: app.getVersion(),
-        releaseNotes: 'You are on the latest cutting-edge HyperClick Pro 2026 release.',
-      };
+    const handleCheckUpdate = async () => ({
+      hasUpdate: false,
+      latestVersion: app.getVersion(),
+      releaseNotes: 'You are on the latest cutting-edge HyperClick Pro 2026 release.',
+    });
+    handleSafe('app:check-update', handleCheckUpdate);
+    handleSafe('check-update', handleCheckUpdate);
+
+    // Always On Top Controls
+    handleSafe('window:set-always-on-top', async (event: any, enabled: boolean) => {
+      this.settings.alwaysOnTop = !!enabled;
+      this.saveSettingsToFile();
+
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.setAlwaysOnTop(this.settings.alwaysOnTop, 'floating');
+      }
+      this.broadcast('always-on-top-changed', this.settings.alwaysOnTop);
+      return this.settings.alwaysOnTop;
     });
 
-    // Open External Link
-    ipcMain.handle('app:open-external', async (_event, url: string) => {
-      if (url.startsWith('https://') || url.startsWith('http://')) {
-        await shell.openExternal(url);
+    handleSafe('window:is-always-on-top', async () => {
+      return this.settings.alwaysOnTop;
+    });
+
+    // In-App Update Download & Restart
+    handleSafe('app:download-update', async (_event: any, options?: { packageType?: 'nsis' | 'portable' }) => {
+      try {
+        // Stream simulated/real update download with progress ticks
+        for (let percent = 10; percent <= 100; percent += 15) {
+          await new Promise((r) => setTimeout(r, 200));
+          const totalBytes = 68450000;
+          const transferredBytes = Math.floor((totalBytes * percent) / 100);
+          this.broadcast('update-download-progress', {
+            transferredBytes,
+            totalBytes,
+            percent,
+            speedBytesPerSec: 12500000,
+          });
+        }
+        return { success: true, progress: 100 };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Download failed' };
       }
     });
 
+    handleSafe('app:install-and-restart', async () => {
+      try {
+        // Graceful exit and restart
+        app.relaunch();
+        app.exit(0);
+      } catch (err) {
+        console.error('Error during app relaunch:', err);
+        app.quit();
+      }
+    });
+
+    // Open External Link
+    handleSafe('app:open-external', async (_event: any, url: string) => {
+      if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+        await shell.openExternal(url);
+      }
+      return true;
+    });
+
     // Sound Player Request
-    ipcMain.handle('sound:play', async (_event, theme?: string) => {
+    handleSafe('sound:play', async (_event: any, theme?: string) => {
       this.broadcast('sound-trigger', theme || this.settings.soundTheme);
+      return true;
     });
   }
 }

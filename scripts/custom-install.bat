@@ -22,15 +22,58 @@ set "SILENT_MODE=0"
 :: Parse command line arguments
 :PARSE_ARGS
 if "%~1"=="" goto ARGS_DONE
-if /i "%~1"=="/SILENT" set "SILENT_MODE=1"
-if /i "%~1"=="/S" set "SILENT_MODE=1"
-if /i "%~1"=="/NO_DESKTOP" set "DESKTOP_SHORTCUT=0"
-if /i "%~1"=="/NO_STARTMENU" set "STARTMENU_SHORTCUT=0"
-if /i "%~1"=="/NO_LAUNCH" set "AUTO_LAUNCH=0"
-if /i "%~1"=="/PORTABLE" set "PORTABLE_MODE=1"
-if /i "%~1"=="/DIR" (
+if /i "%~1"=="/SILENT" (
+    set "SILENT_MODE=1"
     shift
-    set "DEFAULT_DIR=%~1"
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/S" (
+    set "SILENT_MODE=1"
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/NO_DESKTOP" (
+    set "DESKTOP_SHORTCUT=0"
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/NO_STARTMENU" (
+    set "STARTMENU_SHORTCUT=0"
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/NO_LAUNCH" (
+    set "AUTO_LAUNCH=0"
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/PORTABLE" (
+    set "PORTABLE_MODE=1"
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/DIR" (
+    set "DEFAULT_DIR=%~2"
+    shift
+    shift
+    goto PARSE_ARGS
+)
+if /i "%~1"=="/D" (
+    set "DEFAULT_DIR=%~2"
+    shift
+    shift
+    goto PARSE_ARGS
+)
+set "ARG=%~1"
+if /i "!ARG:~0,5!"=="/DIR=" (
+    set "DEFAULT_DIR=!ARG:~5!"
+    shift
+    goto PARSE_ARGS
+)
+if /i "!ARG:~0,3!"=="/D=" (
+    set "DEFAULT_DIR=!ARG:~3!"
+    shift
+    goto PARSE_ARGS
 )
 shift
 goto PARSE_ARGS
@@ -65,7 +108,7 @@ echo    [1] Standard Installation (Recommended)
 echo    [2] Browse / Choose Custom Installation Directory (GUI Picker)
 echo    [3] Manually Type Target Directory Path
 echo    [4] Portable / Standalone Extract (No Registry / No Shortcuts)
-echo    [5] Customize Shortcuts & Launch Options
+echo    [5] Customize Shortcuts ^& Launch Options
 echo    [6] Exit Installer
 echo.
 echo ===============================================================================
@@ -161,7 +204,7 @@ goto CUSTOMIZE_OPTIONS
 :: Execute Installation
 :: ============================================================================
 :DO_INSTALLATION
-cls
+if "%SILENT_MODE%"=="0" cls
 echo ===============================================================================
 echo                    INSTALLING HYPERCLICK PRO 2026
 echo ===============================================================================
@@ -169,12 +212,25 @@ echo.
 echo  Target Path: "%INSTALL_DIR%"
 echo.
 
-:: 1. Detect Source Directory
+:: 1. Detect Source Directory & Project Root
+set "CURRENT_SCRIPT_DIR=%~dp0"
+if "%CURRENT_SCRIPT_DIR:~-1%"=="\" set "CURRENT_SCRIPT_DIR=%CURRENT_SCRIPT_DIR:~0,-1%"
+
+pushd "%CURRENT_SCRIPT_DIR%"
+if exist "..\package.json" (
+    pushd ".."
+    set "PROJECT_ROOT=!CD!"
+    popd
+) else (
+    set "PROJECT_ROOT=!CD!"
+)
+popd
+
 set "SOURCE_DIR="
-if exist "%~dp0..\release\win-unpacked" set "SOURCE_DIR=%~dp0..\release\win-unpacked"
-if not defined SOURCE_DIR if exist "%~dp0win-unpacked" set "SOURCE_DIR=%~dp0win-unpacked"
-if not defined SOURCE_DIR if exist "%~dp0..\dist" set "SOURCE_DIR=%~dp0.."
-if not defined SOURCE_DIR set "SOURCE_DIR=%~dp0.."
+if exist "%PROJECT_ROOT%\release\win-unpacked" set "SOURCE_DIR=%PROJECT_ROOT%\release\win-unpacked"
+if not defined SOURCE_DIR if exist "%CURRENT_SCRIPT_DIR%\win-unpacked" set "SOURCE_DIR=%CURRENT_SCRIPT_DIR%\win-unpacked"
+if not defined SOURCE_DIR if exist "%PROJECT_ROOT%\win-unpacked" set "SOURCE_DIR=%PROJECT_ROOT%\win-unpacked"
+if not defined SOURCE_DIR set "SOURCE_DIR=%PROJECT_ROOT%"
 
 echo [*] Source Directory: "%SOURCE_DIR%"
 
@@ -184,7 +240,7 @@ if not exist "%INSTALL_DIR%" (
     mkdir "%INSTALL_DIR%" 2>nul
     if errorlevel 1 (
         echo [ERROR] Failed to create "%INSTALL_DIR%". Please run as Administrator if installing to Program Files.
-        pause
+        if "%SILENT_MODE%"=="0" pause
         exit /b 1
     )
 )
@@ -193,8 +249,6 @@ if not exist "%INSTALL_DIR%" (
 echo [*] Copying core binaries and resources...
 if exist "%SOURCE_DIR%\HyperClick Pro.exe" (
     robocopy "%SOURCE_DIR%" "%INSTALL_DIR%" /E /IS /IT /NP /NC /NS /NJS /NJH /NFL /NDL >nul
-) else if exist "%SOURCE_DIR%\release\win-unpacked" (
-    robocopy "%SOURCE_DIR%\release\win-unpacked" "%INSTALL_DIR%" /E /IS /IT /NP /NC /NS /NJS /NJH /NFL /NDL >nul
 ) else (
     echo [i] Syncing workspace build output files...
     if exist "%SOURCE_DIR%\dist" robocopy "%SOURCE_DIR%\dist" "%INSTALL_DIR%\dist" /E /NP /NJS /NJH >nul
@@ -204,8 +258,17 @@ if exist "%SOURCE_DIR%\HyperClick Pro.exe" (
 )
 
 :: Copy uninstaller and icon into install folder
-if exist "%~dp0custom-uninstall.bat" copy /Y "%~dp0custom-uninstall.bat" "%INSTALL_DIR%\uninstall.bat" >nul
-if exist "%SOURCE_DIR%\public\icon.ico" copy /Y "%SOURCE_DIR%\public\icon.ico" "%INSTALL_DIR%\icon.ico" >nul
+if exist "%CURRENT_SCRIPT_DIR%\custom-uninstall.bat" (
+    copy /Y "%CURRENT_SCRIPT_DIR%\custom-uninstall.bat" "%INSTALL_DIR%\uninstall.bat" >nul
+) else if exist "%PROJECT_ROOT%\scripts\custom-uninstall.bat" (
+    copy /Y "%PROJECT_ROOT%\scripts\custom-uninstall.bat" "%INSTALL_DIR%\uninstall.bat" >nul
+)
+
+if exist "%PROJECT_ROOT%\public\icon.ico" (
+    copy /Y "%PROJECT_ROOT%\public\icon.ico" "%INSTALL_DIR%\icon.ico" >nul
+) else if exist "%CURRENT_SCRIPT_DIR%\icon.ico" (
+    copy /Y "%CURRENT_SCRIPT_DIR%\icon.ico" "%INSTALL_DIR%\icon.ico" >nul
+)
 
 echo [OK] Files installed successfully.
 

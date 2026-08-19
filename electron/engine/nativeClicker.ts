@@ -22,11 +22,17 @@ import {
 import { HumanizerEngine, GaussianDistribution, BezierTrajectory } from './humanizer';
 import { CS_WORKER_SOURCE } from './workerSource';
 
+interface PendingCommand {
+  resolve: (val: string) => void;
+  reject: (err: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
 export class NativeClickerEngine extends EventEmitter {
   private workerProcess: ChildProcess | null = null;
   private workerReady = false;
   private workerExePath: string | null = null;
-  private pendingRequests: Array<{ resolve: (val: string) => void; reject: (err: Error) => void }> = [];
+  private pendingRequests: PendingCommand[] = [];
 
   private isRunning = false;
   private stopRequested = false;
@@ -42,6 +48,10 @@ export class NativeClickerEngine extends EventEmitter {
   // CPS sliding window tracker (timestamps in ms)
   private clickTimestamps: number[] = [];
   private statusIntervalTimer: NodeJS.Timeout | null = null;
+
+  // Active sleep abort handle
+  private activeSleepResolver: (() => void) | null = null;
+  private activeSleepTimeout: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
@@ -63,39 +73,39 @@ export class NativeClickerEngine extends EventEmitter {
    * Ensures the C# worker is compiled and cached.
    */
   private ensureWorkerBinary(): void {
-    const baseDir = app ? app.getPath('userData') : os.tmpdir();
-    const binDir = path.join(baseDir, 'hyperclick-bin');
-    if (!fs.existsSync(binDir)) {
-      fs.mkdirSync(binDir, { recursive: true });
-    }
-
-    const exePath = path.join(binDir, 'HyperClickWorker.exe');
-    this.workerExePath = exePath;
-
-    if (fs.existsSync(exePath)) {
-      return; // Already compiled
-    }
-
-    const csPath = path.join(binDir, 'HyperClickWorker.cs');
-    fs.writeFileSync(csPath, CS_WORKER_SOURCE, 'utf8');
-
-    // Locate csc.exe
-    const possibleCscPaths = [
-      'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',
-      'C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe',
-      'csc.exe',
-    ];
-
-    let compiler = 'csc.exe';
-    for (const p of possibleCscPaths) {
-      if (fs.existsSync(p)) {
-        compiler = p;
-        break;
+    try {
+      const baseDir = app ? app.getPath('userData') : os.tmpdir();
+      const binDir = path.join(baseDir, 'hyperclick-bin');
+      if (!fs.existsSync(binDir)) {
+        fs.mkdirSync(binDir, { recursive: true });
       }
-    }
 
-    const compileCmd = `"${compiler}" /nologo /optimize+ /target:exe /out:"${exePath}" "${csPath}"`;
-    execSync(compileCmd, { windowsHide: true, stdio: 'ignore' });
+      const exePath = path.join(binDir, 'HyperClickWorker.exe');
+      this.workerExePath = exePath;
+
+      const csPath = path.join(binDir, 'HyperClickWorker.cs');
+      fs.writeFileSync(csPath, CS_WORKER_SOURCE, 'utf8');
+
+      // Locate csc.exe
+      const possibleCscPaths = [
+        'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',
+        'C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe',
+        'csc.exe',
+      ];
+
+      let compiler = 'csc.exe';
+      for (const p of possibleCscPaths) {
+        if (fs.existsSync(p)) {
+          compiler = p;
+          break;
+        }
+      }
+
+      const compileCmd = `"${compiler}" /nologo /optimize+ /target:exe /out:"${exePath}" "${csPath}"`;
+      execSync(compileCmd, { windowsHide: true, stdio: 'ignore' });
+    } catch (err) {
+      console.warn('[HyperClick Engine] Native C# compilation skipped, using fallback:', err);
+    }
   }
 
   /**
@@ -104,56 +114,84 @@ export class NativeClickerEngine extends EventEmitter {
   private spawnWorker(): void {
     if (!this.workerExePath || !fs.existsSync(this.workerExePath)) return;
 
-    this.workerProcess = spawn(this.workerExePath, [], {
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    try {
+      this.workerProcess = spawn(this.workerExePath, [], {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-    let buffer = '';
+      let buffer = '';
 
-    this.workerProcess.stdout?.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString('utf8');
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
+      this.workerProcess.stdout?.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf8');
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
 
-        if (trimmed === 'READY') {
-          this.workerReady = true;
-          continue;
+          if (trimmed === 'READY') {
+            this.workerReady = true;
+            continue;
+          }
+
+          if (trimmed.startsWith('PROGRESS ')) {
+            // PROGRESS <count> <cps>
+            const parts = trimmed.split(' ');
+            const count = parseInt(parts[1], 10);
+            if (!isNaN(count)) {
+              this.clicksPerformed = count;
+              this.emitStatus();
+            }
+            continue;
+          }
+
+          if (trimmed.startsWith('COMPLETED ')) {
+            const parts = trimmed.split(' ');
+            const count = parseInt(parts[1], 10);
+            if (!isNaN(count)) {
+              this.clicksPerformed = count;
+            }
+            this.stop();
+            continue;
+          }
+
+          // Resolves the oldest pending request
+          const req = this.pendingRequests.shift();
+          if (req) {
+            clearTimeout(req.timer);
+            req.resolve(trimmed);
+          }
         }
+      });
 
-        if (trimmed.startsWith('PROGRESS ')) {
-          // PROGRESS <count> <cps>
-          const parts = trimmed.split(' ');
-          const count = parseInt(parts[1], 10);
-          const cps = parseFloat(parts[2]);
-          this.clicksPerformed = count;
-          this.emitStatus();
-          continue;
-        }
+      this.workerProcess.on('error', (err) => {
+        console.warn('[HyperClick Engine] Worker process error:', err);
+        this.flushPendingRequests(new Error('Worker process encountered error'));
+      });
 
-        if (trimmed.startsWith('COMPLETED ')) {
-          const parts = trimmed.split(' ');
-          this.clicksPerformed = parseInt(parts[1], 10);
-          this.stop();
-          continue;
-        }
+      this.workerProcess.on('exit', () => {
+        this.workerReady = false;
+        this.workerProcess = null;
+        this.flushPendingRequests(new Error('Worker process exited'));
+      });
+    } catch (err) {
+      console.warn('[HyperClick Engine] Could not spawn worker process:', err);
+    }
+  }
 
-        // Resolves the oldest pending request
-        const req = this.pendingRequests.shift();
-        if (req) {
-          req.resolve(trimmed);
-        }
+  /**
+   * Cleans up all pending command requests on crash or exit.
+   */
+  private flushPendingRequests(err: Error): void {
+    while (this.pendingRequests.length > 0) {
+      const req = this.pendingRequests.shift();
+      if (req) {
+        clearTimeout(req.timer);
+        req.reject(err);
       }
-    });
-
-    this.workerProcess.on('exit', () => {
-      this.workerReady = false;
-      this.workerProcess = null;
-    });
+    }
   }
 
   /**
@@ -167,8 +205,21 @@ export class NativeClickerEngine extends EventEmitter {
         return;
       }
 
-      this.pendingRequests.push({ resolve, reject });
-      this.workerProcess.stdin?.write(cmd + '\n');
+      const timer = setTimeout(() => {
+        const idx = this.pendingRequests.findIndex((r) => r.timer === timer);
+        if (idx >= 0) {
+          this.pendingRequests.splice(idx, 1);
+          resolve('TIMEOUT');
+        }
+      }, 5000);
+
+      this.pendingRequests.push({ resolve, reject, timer });
+      try {
+        this.workerProcess.stdin?.write(cmd + '\n');
+      } catch (err) {
+        clearTimeout(timer);
+        this.fallbackDispatch(cmd).then(resolve).catch(reject);
+      }
     });
   }
 
@@ -180,25 +231,25 @@ export class NativeClickerEngine extends EventEmitter {
       const parts = cmd.split(' ');
       const action = parts[0];
 
-      if (action === 'GETPOS') {
-        try {
+      try {
+        if (action === 'GETPOS') {
           const out = execSync(
             `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position.X.ToString() + ' ' + [System.Windows.Forms.Cursor]::Position.Y.ToString()"`,
-            { windowsHide: true }
+            { windowsHide: true, timeout: 3000 }
           ).toString().trim();
           resolve(`POS ${out}`);
-        } catch {
-          resolve('POS 0 0');
+        } else if (action === 'MOVE') {
+          const x = parts[1];
+          const y = parts[2];
+          execSync(
+            `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`,
+            { windowsHide: true, timeout: 3000 }
+          );
+          resolve('OK');
+        } else {
+          resolve('OK');
         }
-      } else if (action === 'MOVE') {
-        const x = parts[1];
-        const y = parts[2];
-        execSync(
-          `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`,
-          { windowsHide: true }
-        );
-        resolve('OK');
-      } else {
+      } catch {
         resolve('OK');
       }
     });
@@ -208,11 +259,14 @@ export class NativeClickerEngine extends EventEmitter {
    * Get current cursor position (Win32 GetCursorPos).
    */
   public async getCursorPos(): Promise<Point2D> {
-    const res = await this.sendWorkerCommand('GETPOS');
-    // Response: "POS 123 456"
-    const match = res.match(/POS\s+(-?\d+)\s+(-?\d+)/);
-    if (match) {
-      return { x: parseInt(match[1], 10), y: parseInt(match[2], 10) };
+    try {
+      const res = await this.sendWorkerCommand('GETPOS');
+      const match = res.match(/POS\s+(-?\d+)\s+(-?\d+)/);
+      if (match) {
+        return { x: parseInt(match[1], 10), y: parseInt(match[2], 10) };
+      }
+    } catch {
+      // ignore
     }
     return { x: 0, y: 0 };
   }
@@ -221,11 +275,14 @@ export class NativeClickerEngine extends EventEmitter {
    * Get pixel color under coordinate (Win32 GetPixel).
    */
   public async getPixelColor(x: number, y: number): Promise<string> {
-    const res = await this.sendWorkerCommand(`GETPIXEL ${x} ${y}`);
-    // Response: "COLOR #RRGGBB"
-    const match = res.match(/COLOR\s+(#[0-9A-Fa-f]{6})/);
-    if (match) {
-      return match[1].toUpperCase();
+    try {
+      const res = await this.sendWorkerCommand(`GETPIXEL ${Math.round(x)} ${Math.round(y)}`);
+      const match = res.match(/COLOR\s+(#[0-9A-Fa-f]{6})/);
+      if (match) {
+        return match[1].toUpperCase();
+      }
+    } catch {
+      // ignore
     }
     return '#000000';
   }
@@ -300,9 +357,18 @@ export class NativeClickerEngine extends EventEmitter {
       return { success: false, error: 'Engine already running' };
     }
 
+    // Sanitize configuration inputs
+    const sanitized: ClickConfig = {
+      ...config,
+      cps: Math.max(0.1, Math.min(100000, config.cps || 20)),
+      clickIntervalMs: Math.max(0, config.clickIntervalMs || 0),
+      repeatCount: Math.max(1, config.repeatCount || 100),
+      repeatDurationMs: Math.max(10, config.repeatDurationMs || 10000),
+    };
+
     this.isRunning = true;
     this.stopRequested = false;
-    this.activeConfig = config;
+    this.activeConfig = sanitized;
     this.clicksPerformed = 0;
     this.startTime = Date.now();
     this.currentWaypointIndex = 0;
@@ -316,7 +382,7 @@ export class NativeClickerEngine extends EventEmitter {
     }, 33);
 
     // Run execution loop asynchronously
-    this.runEngineLoop(config).catch((err) => {
+    this.runEngineLoop(sanitized).catch((err) => {
       console.error('[HyperClick Engine Loop Error]:', err);
       this.stop();
     });
@@ -325,13 +391,23 @@ export class NativeClickerEngine extends EventEmitter {
   }
 
   /**
-   * Stops the clicking engine.
+   * Stops the clicking engine immediately.
    */
   public async stop(): Promise<{ success: boolean }> {
-    if (!this.isRunning) return { success: true };
+    if (!this.isRunning && !this.stopRequested) return { success: true };
 
     this.stopRequested = true;
     this.isRunning = false;
+
+    // Abort active sleep timer immediately
+    if (this.activeSleepTimeout) {
+      clearTimeout(this.activeSleepTimeout);
+      this.activeSleepTimeout = null;
+    }
+    if (this.activeSleepResolver) {
+      this.activeSleepResolver();
+      this.activeSleepResolver = null;
+    }
 
     if (this.statusIntervalTimer) {
       clearInterval(this.statusIntervalTimer);
@@ -363,7 +439,7 @@ export class NativeClickerEngine extends EventEmitter {
       const btnCode = config.clickType === 'right' ? 1 : config.clickType === 'middle' ? 2 : 0;
       const x = config.locationMode === 'fixed' ? config.fixedX : -1;
       const y = config.locationMode === 'fixed' ? config.fixedY : -1;
-      const intervalUs = Math.max(10, Math.round(1000000 / config.cps));
+      const intervalUs = Math.max(1, Math.round(1000000 / config.cps));
       const maxClicks = config.repeatMode === 'count' ? config.repeatCount : 0;
 
       await this.sendWorkerCommand(`START_AUTOLOOP ${btnCode} ${x} ${y} ${intervalUs} ${maxClicks} 0`);
@@ -441,13 +517,15 @@ export class NativeClickerEngine extends EventEmitter {
       await this.executeAction(config.clickType, targetX, targetY, config);
 
       // Compute next interval with humanizer variance
-      const baseInterval = config.clickIntervalMs > 0 ? config.clickIntervalMs : 1000 / Math.max(1, config.cps);
+      const baseInterval = config.clickIntervalMs > 0 ? config.clickIntervalMs : 1000 / Math.max(0.1, config.cps);
       const nextInterval = this.humanizer.calculateNextInterval(baseInterval, config.humanizer);
 
       await this.hrSleep(nextInterval);
     }
 
-    await this.stop();
+    if (this.isRunning) {
+      await this.stop();
+    }
   }
 
   /**
@@ -479,7 +557,7 @@ export class NativeClickerEngine extends EventEmitter {
       await this.executeAction(wp.action, target.x, target.y, config, wp.holdDurationMs);
 
       if (c < count - 1) {
-        const intraInterval = config.clickIntervalMs > 0 ? config.clickIntervalMs : 1000 / Math.max(1, config.cps);
+        const intraInterval = config.clickIntervalMs > 0 ? config.clickIntervalMs : 1000 / Math.max(0.1, config.cps);
         await this.hrSleep(intraInterval);
       }
     }
@@ -588,41 +666,91 @@ export class NativeClickerEngine extends EventEmitter {
 
   /**
    * High-Resolution microsecond sleep utility using process.hrtime.bigint() and hybrid spin-wait.
+   * Handles intervals from 1µs (0.001ms) up to 999 hours cleanly and supports instant abort.
    */
   public hrSleep(ms: number): Promise<void> {
-    if (ms <= 0.05) return Promise.resolve();
+    if (ms <= 0.001 || this.stopRequested) return Promise.resolve();
 
     return new Promise((resolve) => {
-      const startNs = process.hrtime.bigint();
-      const targetNs = BigInt(Math.round(ms * 1_000_000));
+      let resolved = false;
 
-      if (ms > 3) {
-        // Sleep bulk time on event loop, then spinwait final 2ms for sub-millisecond precision
-        setTimeout(() => {
+      const safeResolve = () => {
+        if (!resolved) {
+          resolved = true;
+          this.activeSleepResolver = null;
+          this.activeSleepTimeout = null;
+          resolve();
+        }
+      };
+
+      this.activeSleepResolver = safeResolve;
+
+      const startNs = process.hrtime.bigint();
+      const targetNs = BigInt(Math.round(Math.max(0, ms) * 1_000_000));
+
+      if (ms > 20) {
+        // Sleep in chunks of max 25ms to check stopRequested and allow prompt cancellation
+        const checkChunk = () => {
+          if (this.stopRequested || resolved) {
+            safeResolve();
+            return;
+          }
+
+          const elapsedNs = process.hrtime.bigint() - startNs;
+          const remainingNs = targetNs - elapsedNs;
+
+          if (remainingNs <= 0) {
+            safeResolve();
+            return;
+          }
+
+          const remainingMs = Number(remainingNs) / 1_000_000;
+          if (remainingMs > 4) {
+            const nextSleep = Math.min(25, Math.floor(remainingMs - 2));
+            this.activeSleepTimeout = setTimeout(checkChunk, Math.max(1, nextSleep));
+          } else {
+            // Final microsecond spinwait
+            while (process.hrtime.bigint() - startNs < targetNs) {
+              if (this.stopRequested) break;
+            }
+            safeResolve();
+          }
+        };
+
+        const initialSleep = Math.min(25, Math.floor(ms - 2));
+        this.activeSleepTimeout = setTimeout(checkChunk, Math.max(1, initialSleep));
+      } else if (ms > 3) {
+        this.activeSleepTimeout = setTimeout(() => {
           while (process.hrtime.bigint() - startNs < targetNs) {
             if (this.stopRequested) break;
           }
-          resolve();
+          safeResolve();
         }, Math.floor(ms - 2));
       } else {
         setImmediate(() => {
           while (process.hrtime.bigint() - startNs < targetNs) {
             if (this.stopRequested) break;
           }
-          resolve();
+          safeResolve();
         });
       }
     });
   }
 
   /**
-   * Records click event for CPS sliding-window analytics.
+   * Records click event for CPS sliding-window analytics with memory limit safeguard.
    */
   private recordClickEvent(x?: number, y?: number, count = 1): void {
     const now = Date.now();
     for (let i = 0; i < count; i++) {
       this.clickTimestamps.push(now);
       this.clicksPerformed++;
+    }
+
+    // Limit memory size of timestamp buffer (max 30,000 entries)
+    if (this.clickTimestamps.length > 30000) {
+      const cutoff = now - 1000;
+      this.clickTimestamps = this.clickTimestamps.filter((t) => t >= cutoff);
     }
 
     if (x !== undefined && y !== undefined) {
@@ -634,15 +762,28 @@ export class NativeClickerEngine extends EventEmitter {
   }
 
   /**
-   * Calculates actual rolling CPS in the last 1000ms window.
+   * Calculates actual rolling CPS in the last 1000ms window with efficient pruning.
    */
   public getActualCPS(): number {
     const now = Date.now();
     const cutoff = now - 1000;
-    // Prune timestamps older than 1 second
-    while (this.clickTimestamps.length > 0 && this.clickTimestamps[0] < cutoff) {
-      this.clickTimestamps.shift();
+
+    // Fast binary search or slice pruning
+    if (this.clickTimestamps.length > 0 && this.clickTimestamps[0] < cutoff) {
+      let firstValid = -1;
+      for (let i = 0; i < this.clickTimestamps.length; i++) {
+        if (this.clickTimestamps[i] >= cutoff) {
+          firstValid = i;
+          break;
+        }
+      }
+      if (firstValid > 0) {
+        this.clickTimestamps.splice(0, firstValid);
+      } else if (firstValid === -1) {
+        this.clickTimestamps = [];
+      }
     }
+
     return this.clickTimestamps.length;
   }
 

@@ -46,6 +46,7 @@ export class MacroEngine {
   private pingPongDirection: 1 | -1 = 1;
   private isAbortRequested = false;
   private isPauseRequested = false;
+  private isSteppingMode = false;
   private resumeResolver: (() => void) | null = null;
   private stepResolver: (() => void) | null = null;
   private currentCursorPos: Point2D = { x: 960, y: 540 };
@@ -225,6 +226,7 @@ export class MacroEngine {
       this.currentWaypointIndex = (this.currentWaypointIndex + 1) % waypoints.length;
       this.notifyStateChange('paused');
     } else if (this.state === 'paused') {
+      this.isSteppingMode = true;
       this.notifyStateChange('stepping');
       if (this.resumeResolver) {
         this.resumeResolver();
@@ -269,6 +271,13 @@ export class MacroEngine {
         const wp = executionOrder[i];
         this.currentWaypointIndex = i;
         await this.executeWaypoint(wp, i);
+
+        // If in stepping mode, re-pause immediately after executing one waypoint
+        if (this.isSteppingMode) {
+          this.isPauseRequested = true;
+          this.isSteppingMode = false;
+          this.notifyStateChange('paused');
+        }
       }
 
       this.currentLoop++;

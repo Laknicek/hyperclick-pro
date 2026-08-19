@@ -9,11 +9,14 @@
  * - Soft Bubble Pop (Exponential upward frequency glide + organic cavity pop)
  * - Retro Arcade Beep (8-bit dual-tone square wave chiptune punch)
  * - Subtle Tech Pulse (Sub-bass transient drop + ultra-short sterile tick)
+ * - Muted (Zero audio output)
  * 
  * Features:
  * - Real-time Master Volume & Mute control
  * - Dynamic Pitch Modulation (humanized detuning to eliminate repetition fatigue)
- * - High-Rate Voice Limiting & Dynamics Compressor (clean audio even at 1,000+ CPS)
+ * - Ultra-High CPS Micro-Transient Adaptive Rate Limiting (handles 1,000+ CPS cleanly)
+ * - Automatic AudioNode Graph Garbage Collection & Disconnection (zero memory leak)
+ * - Dynamics Compressor with soft-knee limiting to eliminate clipping
  * - AnalyserNode integration for live VU meters and visualizer pulses
  */
 
@@ -126,9 +129,9 @@ class SoundEngine {
   }
 
   /**
-   * Initializes the AudioContext and graph nodes
+   * Initializes or resumes the AudioContext and graph nodes
    */
-  private initContext(): boolean {
+  public initContext(): boolean {
     if (this.ctx && this.ctx.state !== 'closed') {
       if (this.ctx.state === 'suspended') {
         this.ctx.resume().catch(() => {});
@@ -151,7 +154,7 @@ class SoundEngine {
       this.compressor.knee.setValueAtTime(24, this.ctx.currentTime);
       this.compressor.ratio.setValueAtTime(12, this.ctx.currentTime);
       this.compressor.attack.setValueAtTime(0.002, this.ctx.currentTime);
-      this.compressor.release.setValueAtTime(0.06, this.ctx.currentTime);
+      this.compressor.release.setValueAtTime(0.05, this.ctx.currentTime);
 
       // Create AnalyserNode for live VU meter and visualizer
       this.analyser = this.ctx.createAnalyser();
@@ -182,6 +185,16 @@ class SoundEngine {
   }
 
   /**
+   * Returns current active AudioContext (for shared UI chimes)
+   */
+  public getAudioContext(): AudioContext | null {
+    if (!this.ctx || this.ctx.state === 'closed') {
+      this.initContext();
+    }
+    return this.ctx;
+  }
+
+  /**
    * Pre-generates 1 second of stereo white noise
    */
   private generateNoiseBuffer() {
@@ -193,11 +206,27 @@ class SoundEngine {
     for (let channel = 0; channel < 2; channel++) {
       const channelData = buffer.getChannelData(channel);
       for (let i = 0; i < length; i++) {
-        // High quality white noise with slight pink noise weighting
         channelData[i] = (Math.random() * 2 - 1) * 0.8;
       }
     }
     this.noiseBuffer = buffer;
+  }
+
+  /**
+   * Explicitly schedules disconnection of AudioNodes to prevent memory bloat
+   */
+  private scheduleNodeCleanup(nodes: (AudioNode | null | undefined)[], delayMs: number) {
+    setTimeout(() => {
+      for (const node of nodes) {
+        if (node) {
+          try {
+            node.disconnect();
+          } catch {
+            // Ignore if already disconnected
+          }
+        }
+      }
+    }, delayMs);
   }
 
   /**
@@ -254,8 +283,10 @@ class SoundEngine {
 
     const now = this.ctx.currentTime;
 
-    // High CPS voice throttling: limit min interval to 10ms to prevent audio queue lag
-    if (now - this.lastPlayTime < 0.010 && this.activeVoicesCount > this.config.maxPolyphony) {
+    // High CPS voice throttling (1000+ CPS Protection):
+    // Enforce 12ms minimum voice gap (~83 triggers/sec max) and hard voice cap to eliminate distortion
+    const timeDelta = now - this.lastPlayTime;
+    if (timeDelta < 0.012 || this.activeVoicesCount >= this.config.maxPolyphony) {
       return;
     }
     this.lastPlayTime = now;
@@ -264,7 +295,7 @@ class SoundEngine {
     this.activeVoicesCount++;
     setTimeout(() => {
       this.activeVoicesCount = Math.max(0, this.activeVoicesCount - 1);
-    }, 50);
+    }, 45);
 
     const pitchMul = this.getPitchMultiplier();
 
@@ -299,13 +330,13 @@ class SoundEngine {
    */
   private synthCherryMxBlue(now: number, pitchMul: number) {
     if (!this.ctx || !this.masterGain) return;
+    const nodesToClean: AudioNode[] = [];
 
     // --- 1. Metallic Leaf Snap (Filtered Noise Burst) ---
     if (this.noiseBuffer) {
       const noiseSource = this.ctx.createBufferSource();
       noiseSource.buffer = this.noiseBuffer;
-      // Start at random offset
-      noiseSource.start(now, Math.random() * 0.8, 0.018);
+      noiseSource.start(now, Math.random() * 0.8, 0.016);
 
       const noiseFilter = this.ctx.createBiquadFilter();
       noiseFilter.type = 'bandpass';
@@ -319,6 +350,8 @@ class SoundEngine {
       noiseSource.connect(noiseFilter);
       noiseFilter.connect(noiseGain);
       noiseGain.connect(this.masterGain);
+
+      nodesToClean.push(noiseSource, noiseFilter, noiseGain);
     }
 
     // --- 2. High Ping Tone (Metallic contact leaf resonance) ---
@@ -335,21 +368,25 @@ class SoundEngine {
     pingGain.connect(this.masterGain);
     pingOsc.start(now);
     pingOsc.stop(now + 0.012);
+    nodesToClean.push(pingOsc, pingGain);
 
     // --- 3. Housing Thud (Deep body bottom-out impact) ---
     const thudOsc = this.ctx.createOscillator();
     const thudGain = this.ctx.createGain();
     thudOsc.type = 'triangle';
     thudOsc.frequency.setValueAtTime(410 * pitchMul, now);
-    thudOsc.frequency.exponentialRampToValueAtTime(120 * pitchMul, now + 0.024);
+    thudOsc.frequency.exponentialRampToValueAtTime(120 * pitchMul, now + 0.022);
 
-    thudGain.gain.setValueAtTime(0.55, now);
-    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
+    thudGain.gain.setValueAtTime(0.5, now);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.024);
 
     thudOsc.connect(thudGain);
     thudGain.connect(this.masterGain);
     thudOsc.start(now);
-    thudOsc.stop(now + 0.026);
+    thudOsc.stop(now + 0.025);
+    nodesToClean.push(thudOsc, thudGain);
+
+    this.scheduleNodeCleanup(nodesToClean, 40);
   }
 
   /**
@@ -358,12 +395,13 @@ class SoundEngine {
    */
   private synthKailhBoxWhite(now: number, pitchMul: number) {
     if (!this.ctx || !this.masterGain) return;
+    const nodesToClean: AudioNode[] = [];
 
     // --- 1. Clickbar Snap (Sharp high-frequency burst) ---
     if (this.noiseBuffer) {
       const snapNoise = this.ctx.createBufferSource();
       snapNoise.buffer = this.noiseBuffer;
-      snapNoise.start(now, Math.random() * 0.8, 0.009);
+      snapNoise.start(now, Math.random() * 0.8, 0.008);
 
       const snapFilter = this.ctx.createBiquadFilter();
       snapFilter.type = 'bandpass';
@@ -371,12 +409,14 @@ class SoundEngine {
       snapFilter.Q.setValueAtTime(9.0, now);
 
       const snapGain = this.ctx.createGain();
-      snapGain.gain.setValueAtTime(0.85, now);
+      snapGain.gain.setValueAtTime(0.8, now);
       snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.007);
 
       snapNoise.connect(snapFilter);
       snapFilter.connect(snapGain);
       snapGain.connect(this.masterGain);
+
+      nodesToClean.push(snapNoise, snapFilter, snapGain);
     }
 
     // --- 2. High Spring Click Ping ---
@@ -386,13 +426,14 @@ class SoundEngine {
     pingOsc.frequency.setValueAtTime(4800 * pitchMul, now);
     pingOsc.frequency.exponentialRampToValueAtTime(3100 * pitchMul, now + 0.008);
 
-    pingGain.gain.setValueAtTime(0.4, now);
+    pingGain.gain.setValueAtTime(0.35, now);
     pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.008);
 
     pingOsc.connect(pingGain);
     pingGain.connect(this.masterGain);
     pingOsc.start(now);
     pingOsc.stop(now + 0.010);
+    nodesToClean.push(pingOsc, pingGain);
 
     // --- 3. Crisp Stem Tap ---
     const tapOsc = this.ctx.createOscillator();
@@ -401,13 +442,16 @@ class SoundEngine {
     tapOsc.frequency.setValueAtTime(680 * pitchMul, now);
     tapOsc.frequency.exponentialRampToValueAtTime(240 * pitchMul, now + 0.014);
 
-    tapGain.gain.setValueAtTime(0.45, now);
+    tapGain.gain.setValueAtTime(0.4, now);
     tapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.014);
 
     tapOsc.connect(tapGain);
     tapGain.connect(this.masterGain);
     tapOsc.start(now);
     tapOsc.stop(now + 0.015);
+    nodesToClean.push(tapOsc, tapGain);
+
+    this.scheduleNodeCleanup(nodesToClean, 35);
   }
 
   /**
@@ -416,6 +460,7 @@ class SoundEngine {
    */
   private synthCyberLaser(now: number, pitchMul: number) {
     if (!this.ctx || !this.masterGain) return;
+    const nodesToClean: AudioNode[] = [];
 
     // --- 1. Laser Frequency Sweep (Sawtooth with Bandpass) ---
     const laserOsc = this.ctx.createOscillator();
@@ -424,37 +469,41 @@ class SoundEngine {
 
     laserOsc.type = 'sawtooth';
     laserOsc.frequency.setValueAtTime(2100 * pitchMul, now);
-    laserOsc.frequency.exponentialRampToValueAtTime(110 * pitchMul, now + 0.040);
+    laserOsc.frequency.exponentialRampToValueAtTime(110 * pitchMul, now + 0.035);
 
     filter.type = 'bandpass';
     filter.frequency.setValueAtTime(2800 * pitchMul, now);
-    filter.frequency.exponentialRampToValueAtTime(320 * pitchMul, now + 0.040);
+    filter.frequency.exponentialRampToValueAtTime(320 * pitchMul, now + 0.035);
     filter.Q.setValueAtTime(4.5, now);
 
-    laserGain.gain.setValueAtTime(0.6, now);
-    laserGain.gain.exponentialRampToValueAtTime(0.001, now + 0.042);
+    laserGain.gain.setValueAtTime(0.55, now);
+    laserGain.gain.exponentialRampToValueAtTime(0.001, now + 0.038);
 
     laserOsc.connect(filter);
     filter.connect(laserGain);
     laserGain.connect(this.masterGain);
 
     laserOsc.start(now);
-    laserOsc.stop(now + 0.045);
+    laserOsc.stop(now + 0.040);
+    nodesToClean.push(laserOsc, filter, laserGain);
 
     // --- 2. Low Sub Body ---
     const subOsc = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     subOsc.type = 'sine';
     subOsc.frequency.setValueAtTime(750 * pitchMul, now);
-    subOsc.frequency.exponentialRampToValueAtTime(80 * pitchMul, now + 0.035);
+    subOsc.frequency.exponentialRampToValueAtTime(80 * pitchMul, now + 0.030);
 
-    subGain.gain.setValueAtTime(0.35, now);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+    subGain.gain.setValueAtTime(0.3, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.030);
 
     subOsc.connect(subGain);
     subGain.connect(this.masterGain);
     subOsc.start(now);
-    subOsc.stop(now + 0.038);
+    subOsc.stop(now + 0.032);
+    nodesToClean.push(subOsc, subGain);
+
+    this.scheduleNodeCleanup(nodesToClean, 50);
   }
 
   /**
@@ -463,6 +512,7 @@ class SoundEngine {
    */
   private synthBubblePop(now: number, pitchMul: number) {
     if (!this.ctx || !this.masterGain) return;
+    const nodesToClean: AudioNode[] = [];
 
     // --- 1. Upward Sine Glide ---
     const popOsc = this.ctx.createOscillator();
@@ -470,18 +520,18 @@ class SoundEngine {
 
     popOsc.type = 'sine';
     popOsc.frequency.setValueAtTime(170 * pitchMul, now);
-    popOsc.frequency.exponentialRampToValueAtTime(880 * pitchMul, now + 0.026);
+    popOsc.frequency.exponentialRampToValueAtTime(880 * pitchMul, now + 0.024);
 
-    // Envelope: instant soft attack, natural exponential release
     popGain.gain.setValueAtTime(0.01, now);
-    popGain.gain.linearRampToValueAtTime(0.7, now + 0.003);
-    popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+    popGain.gain.linearRampToValueAtTime(0.65, now + 0.003);
+    popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.030);
 
     popOsc.connect(popGain);
     popGain.connect(this.masterGain);
 
     popOsc.start(now);
-    popOsc.stop(now + 0.038);
+    popOsc.stop(now + 0.032);
+    nodesToClean.push(popOsc, popGain);
 
     // --- 2. Hollow Cavity Body ---
     const cavityOsc = this.ctx.createOscillator();
@@ -489,16 +539,19 @@ class SoundEngine {
 
     cavityOsc.type = 'triangle';
     cavityOsc.frequency.setValueAtTime(320 * pitchMul, now);
-    cavityOsc.frequency.exponentialRampToValueAtTime(640 * pitchMul, now + 0.022);
+    cavityOsc.frequency.exponentialRampToValueAtTime(640 * pitchMul, now + 0.020);
 
-    cavityGain.gain.setValueAtTime(0.25, now);
-    cavityGain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
+    cavityGain.gain.setValueAtTime(0.2, now);
+    cavityGain.gain.exponentialRampToValueAtTime(0.001, now + 0.022);
 
     cavityOsc.connect(cavityGain);
     cavityGain.connect(this.masterGain);
 
     cavityOsc.start(now);
-    cavityOsc.stop(now + 0.028);
+    cavityOsc.stop(now + 0.024);
+    nodesToClean.push(cavityOsc, cavityGain);
+
+    this.scheduleNodeCleanup(nodesToClean, 45);
   }
 
   /**
@@ -507,24 +560,27 @@ class SoundEngine {
    */
   private synthRetroArcade(now: number, pitchMul: number) {
     if (!this.ctx || !this.masterGain) return;
+    const nodesToClean: AudioNode[] = [];
 
     const squareOsc = this.ctx.createOscillator();
     const squareGain = this.ctx.createGain();
 
     squareOsc.type = 'square';
-    // Arpeggiate B5 (987.77 Hz) to E6 (1318.51 Hz)
     squareOsc.frequency.setValueAtTime(987.77 * pitchMul, now);
-    squareOsc.frequency.setValueAtTime(1318.51 * pitchMul, now + 0.014);
+    squareOsc.frequency.setValueAtTime(1318.51 * pitchMul, now + 0.012);
 
-    squareGain.gain.setValueAtTime(0.45, now);
-    squareGain.gain.setValueAtTime(0.45, now + 0.022);
-    squareGain.gain.exponentialRampToValueAtTime(0.001, now + 0.034);
+    squareGain.gain.setValueAtTime(0.4, now);
+    squareGain.gain.setValueAtTime(0.4, now + 0.020);
+    squareGain.gain.exponentialRampToValueAtTime(0.001, now + 0.030);
 
     squareOsc.connect(squareGain);
     squareGain.connect(this.masterGain);
 
     squareOsc.start(now);
-    squareOsc.stop(now + 0.036);
+    squareOsc.stop(now + 0.032);
+    nodesToClean.push(squareOsc, squareGain);
+
+    this.scheduleNodeCleanup(nodesToClean, 45);
   }
 
   /**
@@ -533,6 +589,7 @@ class SoundEngine {
    */
   private synthTechPulse(now: number, pitchMul: number) {
     if (!this.ctx || !this.masterGain) return;
+    const nodesToClean: AudioNode[] = [];
 
     // --- 1. Sub Bass Transient Punch ---
     const subOsc = this.ctx.createOscillator();
@@ -540,15 +597,16 @@ class SoundEngine {
 
     subOsc.type = 'sine';
     subOsc.frequency.setValueAtTime(115 * pitchMul, now);
-    subOsc.frequency.exponentialRampToValueAtTime(40 * pitchMul, now + 0.032);
+    subOsc.frequency.exponentialRampToValueAtTime(40 * pitchMul, now + 0.028);
 
-    subGain.gain.setValueAtTime(0.65, now);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+    subGain.gain.setValueAtTime(0.6, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.030);
 
     subOsc.connect(subGain);
     subGain.connect(this.masterGain);
     subOsc.start(now);
-    subOsc.stop(now + 0.038);
+    subOsc.stop(now + 0.032);
+    nodesToClean.push(subOsc, subGain);
 
     // --- 2. High Sterile Tick ---
     if (this.noiseBuffer) {
@@ -562,13 +620,17 @@ class SoundEngine {
       filter.Q.setValueAtTime(6.0, now);
 
       const tickGain = this.ctx.createGain();
-      tickGain.gain.setValueAtTime(0.3, now);
+      tickGain.gain.setValueAtTime(0.25, now);
       tickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.004);
 
       tick.connect(filter);
       filter.connect(tickGain);
       tickGain.connect(this.masterGain);
+
+      nodesToClean.push(tick, filter, tickGain);
     }
+
+    this.scheduleNodeCleanup(nodesToClean, 45);
   }
 
   /**

@@ -1,27 +1,44 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings2, 
   Keyboard, 
   Volume2, 
+  VolumeX,
   Sparkles, 
-  Monitor, 
   ShieldAlert, 
   Zap, 
   Palette,
-  Info
+  RefreshCw,
+  Play,
+  Activity,
+  Sliders
 } from 'lucide-react';
 import { AppSettings, ThemeAccent } from '../types';
-import { playClickSound } from '../utils/audio';
+import { playClickSound, soundEngine, SOUND_PROFILES } from '../utils/audio';
+import { SoundProfileId } from '../types/sound';
 
 interface SettingsViewProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
+  onOpenUpdateModal?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   settings,
   onUpdateSettings,
+  onOpenUpdateModal,
 }) => {
+  const [activeLevel, setActiveLevel] = useState(0);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+
+  // Subscribe to audio level for live VU meter in settings
+  useEffect(() => {
+    const unsub = soundEngine.subscribeToLevel((lvl) => {
+      setActiveLevel(lvl);
+    });
+    return () => unsub();
+  }, []);
+
   const accents: { id: ThemeAccent; label: string; color: string }[] = [
     { id: 'cyan', label: 'Cyberpunk Cyan', color: '#00f2fe' },
     { id: 'purple', label: 'Neon Violet', color: '#7f00ff' },
@@ -30,28 +47,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     { id: 'amber', label: 'Solar Amber', color: '#ffaa00' },
   ];
 
-  const soundThemes: { id: AppSettings['audioTheme']; label: string; desc: string }[] = [
-    { id: 'mechanical', label: 'Mechanical Switch', desc: 'Tactile blue switch click + clack' },
-    { id: 'laser', label: 'Cyber Laser', desc: 'Sci-fi pulse burst' },
-    { id: 'subtle', label: 'Subtle Tick', desc: 'Minimalist quiet tick' },
-    { id: 'synth', label: 'Synth Pop', desc: 'Harmonic frequency chirp' },
-  ];
+  const handleAudition = (e: React.MouseEvent, profileId: SoundProfileId) => {
+    e.stopPropagation();
+    onUpdateSettings({ audioTheme: profileId });
+    playClickSound(profileId, settings.soundVolume);
+    setPreviewingId(profileId);
+    setTimeout(() => setPreviewingId(null), 180);
+  };
 
   return (
     <div className="flex flex-col gap-4">
       {/* Top Banner */}
-      <div className="glass-card rounded-2xl p-4 border border-white/[0.08] flex items-center gap-3">
-        <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-          <Settings2 className="w-5 h-5" />
+      <div className="glass-card rounded-2xl p-4 border border-white/[0.08] flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+            <Settings2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
+              Engine Configuration & Hardware Calibration
+            </h2>
+            <p className="text-xs text-slate-400">
+              Fine-tune high-precision timers, global desktop hotkeys, audio switch simulation, and desktop behavior.
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-            Engine Configuration & Hardware Calibration
-          </h2>
-          <p className="text-xs text-slate-400">
-            Fine-tune high-precision timers, global desktop hotkeys, audio switch simulation, and desktop behavior.
-          </p>
-        </div>
+
+        {/* Check for Updates Header Quick Action */}
+        {onOpenUpdateModal && (
+          <button
+            type="button"
+            onClick={onOpenUpdateModal}
+            className="px-3.5 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-xs font-semibold text-cyan-300 flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(0,242,254,0.15)]"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Check for Updates</span>
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -108,15 +140,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex items-center gap-2">
               <Volume2 className="w-4 h-4 text-cyan-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                Acoustic Click Feedback
+                Acoustic Click Synthesizer
               </h3>
             </div>
-            <input
-              type="checkbox"
-              checked={settings.soundEffects}
-              onChange={(e) => onUpdateSettings({ soundEffects: e.target.checked })}
-              className="accent-cyan-400 w-4 h-4 rounded cursor-pointer"
-            />
+
+            {/* Live VU Meter indicator */}
+            <div className="flex items-center gap-2">
+              <Activity className={`w-3.5 h-3.5 transition-colors ${activeLevel > 0.08 ? 'text-emerald-400 animate-pulse' : 'text-slate-600'}`} />
+              <input
+                type="checkbox"
+                checked={settings.soundEffects}
+                onChange={(e) => {
+                  onUpdateSettings({ soundEffects: e.target.checked });
+                  soundEngine.setMuted(!e.target.checked);
+                }}
+                className="accent-cyan-400 w-4 h-4 rounded cursor-pointer"
+              />
+            </div>
           </div>
 
           {/* Volume Slider */}
@@ -131,35 +171,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               max="1"
               step="0.05"
               value={settings.soundVolume}
-              onChange={(e) => onUpdateSettings({ soundVolume: parseFloat(e.target.value) })}
+              onChange={(e) => {
+                const vol = parseFloat(e.target.value);
+                onUpdateSettings({ soundVolume: vol });
+                soundEngine.setMasterVolume(vol);
+              }}
               className="neon-slider"
             />
           </div>
 
-          {/* Audio Profile Selector */}
-          <div className="flex flex-col gap-1.5 mt-2">
+          {/* Audio Profile Selector (All 6 Profiles) */}
+          <div className="flex flex-col gap-1.5 mt-1">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Switch Sound Acoustic Profile:
+              Sound Profile Selection:
             </span>
-            <div className="grid grid-cols-2 gap-2">
-              {soundThemes.map((st) => (
-                <button
-                  key={st.id}
-                  type="button"
-                  onClick={() => {
-                    onUpdateSettings({ audioTheme: st.id });
-                    playClickSound(st.id, settings.soundVolume);
-                  }}
-                  className={`p-2 rounded-xl text-left border transition-all ${
-                    settings.audioTheme === st.id
-                      ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-300 shadow-glow-cyan'
-                      : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <div className="text-xs font-bold">{st.label}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{st.desc}</div>
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-1.5 max-h-[170px] overflow-y-auto pr-1 custom-scrollbar">
+              {SOUND_PROFILES.map((prof) => {
+                const isSelected = settings.audioTheme === prof.id || 
+                  (settings.audioTheme === 'mechanical' && prof.id === 'cherry-mx-blue') ||
+                  (settings.audioTheme === 'laser' && prof.id === 'cyber-laser') ||
+                  (settings.audioTheme === 'synth' && prof.id === 'retro-arcade') ||
+                  (settings.audioTheme === 'subtle' && prof.id === 'tech-pulse');
+
+                return (
+                  <button
+                    key={prof.id}
+                    type="button"
+                    onClick={(e) => handleAudition(e, prof.id)}
+                    className={`p-2 rounded-xl text-left border transition-all flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-300 shadow-glow-cyan'
+                        : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    <div className="min-w-0 pr-1">
+                      <div className="text-xs font-bold truncate">{prof.name}</div>
+                      <div className="text-[9px] text-slate-400 font-mono truncate">{prof.badge}</div>
+                    </div>
+                    {prof.id !== 'muted' && (
+                      <Play className={`w-3 h-3 flex-shrink-0 ${isSelected ? 'text-cyan-400 fill-cyan-400' : 'text-slate-500'}`} />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -196,7 +250,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <input
               type="checkbox"
               checked={settings.alwaysOnTop}
-              onChange={(e) => onUpdateSettings({ alwaysOnTop: e.target.checked })}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                onUpdateSettings({ alwaysOnTop: checked });
+                if (typeof window !== 'undefined') {
+                  const win = window as any;
+                  if (win.electronAPI?.setAlwaysOnTop) {
+                    win.electronAPI.setAlwaysOnTop(checked);
+                  }
+                }
+              }}
               className="accent-cyan-400 w-4 h-4 rounded cursor-pointer"
             />
           </div>
@@ -236,3 +299,5 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     </div>
   );
 };
+
+export default SettingsView;

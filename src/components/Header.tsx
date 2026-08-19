@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Zap, 
   Minus, 
@@ -7,10 +7,11 @@ import {
   Volume2, 
   VolumeX, 
   PictureInPicture, 
-  ShieldCheck, 
   Activity,
-  Layers,
-  Sparkles
+  Sparkles,
+  RefreshCw,
+  Pin,
+  PinOff
 } from 'lucide-react';
 import { TelemetryData, AppSettings } from '../types';
 
@@ -22,6 +23,7 @@ interface HeaderProps {
   onToggleMiniHud: () => void;
   isMiniHudActive: boolean;
   onPanicStop: () => void;
+  onOpenUpdateModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -32,30 +34,62 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMiniHud,
   isMiniHudActive,
   onPanicStop,
+  onOpenUpdateModal,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
 
-  // Electron IPC Handlers
+  // Toggle Always On Top
+  const handleToggleAlwaysOnTop = async () => {
+    const nextState = !settings.alwaysOnTop;
+    onUpdateSettings({ alwaysOnTop: nextState });
+
+    if (typeof window !== 'undefined') {
+      const win = window as any;
+      if (win.electronAPI?.setAlwaysOnTop) {
+        await win.electronAPI.setAlwaysOnTop(nextState);
+      }
+    }
+  };
+
+  // Electron IPC Window Handlers
   const handleMinimize = () => {
-    if (typeof window !== 'undefined' && (window as any).electron?.minimize) {
-      (window as any).electron.minimize();
+    if (typeof window !== 'undefined') {
+      const win = window as any;
+      if (win.electron?.minimize) {
+        win.electron.minimize();
+      } else if (win.electronAPI?.minimizeWindow) {
+        win.electronAPI.minimizeWindow();
+      }
     }
   };
 
   const handleMaximize = () => {
-    if (typeof window !== 'undefined' && (window as any).electron?.maximize) {
-      (window as any).electron.maximize();
-      setIsMaximized(!isMaximized);
+    if (typeof window !== 'undefined') {
+      const win = window as any;
+      if (win.electron?.maximize) {
+        win.electron.maximize();
+        setIsMaximized(!isMaximized);
+      } else if (win.electronAPI?.maximizeWindow) {
+        win.electronAPI.maximizeWindow();
+        setIsMaximized(!isMaximized);
+      } else {
+        setIsMaximized(!isMaximized);
+      }
     } else {
       setIsMaximized(!isMaximized);
     }
   };
 
   const handleClose = () => {
-    if (typeof window !== 'undefined' && (window as any).electron?.close) {
-      (window as any).electron.close();
-    } else {
-      window.close();
+    if (typeof window !== 'undefined') {
+      const win = window as any;
+      if (win.electron?.close) {
+        win.electron.close();
+      } else if (win.electronAPI?.closeWindow) {
+        win.electronAPI.closeWindow();
+      } else {
+        window.close();
+      }
     }
   };
 
@@ -122,7 +156,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Right Controls: Audio, Mini-HUD, Window Buttons */}
+      {/* Right Controls: Audio, Mini-HUD, Updater, Window Buttons */}
       <div className="flex items-center gap-1 no-drag">
         {/* Sound Toggle */}
         <button
@@ -136,6 +170,30 @@ export const Header: React.FC<HeaderProps> = ({
         >
           {settings.soundEffects ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
         </button>
+
+        {/* Always On Top Toggle */}
+        <button
+          onClick={handleToggleAlwaysOnTop}
+          className={`p-1.5 rounded-lg transition-all ${
+            settings.alwaysOnTop 
+              ? 'text-cyan-300 bg-cyan-500/20 border border-cyan-500/40 shadow-glow-cyan' 
+              : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+          }`}
+          title={settings.alwaysOnTop ? 'Always On Top: Active' : 'Enable Always On Top'}
+        >
+          {settings.alwaysOnTop ? <Pin className="w-4 h-4 fill-cyan-400/30" /> : <PinOff className="w-4 h-4" />}
+        </button>
+
+        {/* Check Updates Modal Trigger */}
+        {onOpenUpdateModal && (
+          <button
+            onClick={onOpenUpdateModal}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-white/5 transition-all"
+            title="Check for Updates & Release Notes"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        )}
 
         {/* Mini HUD Mode Toggle */}
         <button
