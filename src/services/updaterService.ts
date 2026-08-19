@@ -161,14 +161,14 @@ export const MOCK_LATEST_RELEASE: UpdateReleaseInfo = {
 - Added automatic crash recovery & state persistence.
 - Optimized Electron runtime bundle size by 35%.`,
   publishedAt: '2026-08-19T18:30:00Z',
-  htmlUrl: 'https://github.com/hyperclick-project/hyperclick-pro/releases/tag/v1.1.0',
+  htmlUrl: 'https://github.com/Laknicek/hyperclick-pro/releases/tag/v1.1.0',
   isPrerelease: false,
   isDraft: false,
   installerAsset: {
     id: 101,
     name: 'HyperClick-Pro-Setup-1.1.0.exe',
     size: 71824512, // ~68.5 MB
-    downloadUrl: 'https://github.com/hyperclick-project/hyperclick-pro/releases/download/v1.1.0/HyperClick-Pro-Setup-1.1.0.exe',
+    downloadUrl: 'https://github.com/Laknicek/hyperclick-pro/releases/download/v1.1.0/HyperClick-Pro-Setup-1.1.0.exe',
     contentType: 'application/x-msdownload',
     downloadCount: 1420,
     updatedAt: '2026-08-19T18:32:00Z',
@@ -179,7 +179,7 @@ export const MOCK_LATEST_RELEASE: UpdateReleaseInfo = {
     id: 102,
     name: 'HyperClick-Pro-Portable-1.1.0.exe',
     size: 69412896, // ~66.2 MB
-    downloadUrl: 'https://github.com/hyperclick-project/hyperclick-pro/releases/download/v1.1.0/HyperClick-Pro-Portable-1.1.0.exe',
+    downloadUrl: 'https://github.com/Laknicek/hyperclick-pro/releases/download/v1.1.0/HyperClick-Pro-Portable-1.1.0.exe',
     contentType: 'application/x-msdownload',
     downloadCount: 890,
     updatedAt: '2026-08-19T18:33:00Z',
@@ -211,7 +211,7 @@ export class UpdaterService {
   private static instance: UpdaterService;
 
   private currentVersion: string = '1.0.0';
-  private repoOwner: string = 'hyperclick-project';
+  private repoOwner: string = 'Laknicek';
   private repoName: string = 'hyperclick-pro';
   
   private status: UpdateStatus = 'idle';

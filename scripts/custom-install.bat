@@ -234,7 +234,7 @@ if "%PORTABLE_MODE%"=="0" (
     reg add "%REG_KEY%" /v "DisplayIcon" /t REG_SZ /d "%INSTALL_DIR%\icon.ico" /f >nul 2>&1
     reg add "%REG_KEY%" /v "UninstallString" /t REG_SZ /d "\"%INSTALL_DIR%\uninstall.bat\"" /f >nul 2>&1
     reg add "%REG_KEY%" /v "QuietUninstallString" /t REG_SZ /d "\"%INSTALL_DIR%\uninstall.bat\" /SILENT" /f >nul 2>&1
-    reg add "%REG_KEY%" /v "URLInfoAbout" /t REG_SZ /d "https://github.com/hyperclick-project/hyperclick-pro" /f >nul 2>&1
+    reg add "%REG_KEY%" /v "URLInfoAbout" /t REG_SZ /d "https://github.com/Laknicek/hyperclick-pro" /f >nul 2>&1
     reg add "%REG_KEY%" /v "NoModify" /t REG_DWORD /d 1 /f >nul 2>&1
     reg add "%REG_KEY%" /v "NoRepair" /t REG_DWORD /d 1 /f >nul 2>&1
     echo [OK] Registered in Windows Registry.

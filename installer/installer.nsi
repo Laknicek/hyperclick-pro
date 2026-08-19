@@ -8,7 +8,7 @@ Unicode True
 !define PRODUCT_NAME "HyperClick Pro"
 !define PRODUCT_VERSION "1.0.0"
 !define PRODUCT_PUBLISHER "HyperClick Engineering"
-!define PRODUCT_WEB_SITE "https://github.com/hyperclick-project/hyperclick-pro"
+!define PRODUCT_WEB_SITE "https://github.com/Laknicek/hyperclick-pro"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\HyperClick Pro.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define PRODUCT_UNINST_ROOT_KEY "HKCU"

@@ -118,7 +118,7 @@ hyperclick-pro/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/hyperclick-project/hyperclick-pro.git
+git clone https://github.com/Laknicek/hyperclick-pro.git
 cd hyperclick-pro
 
 # 2. Install all dependencies

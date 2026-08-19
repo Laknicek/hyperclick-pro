@@ -94,7 +94,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "hyperclick-project",
+        "owner": "Laknicek",
         "repo": "hyperclick-pro"
       }
     ]

@@ -13,12 +13,12 @@
 
 **Next-Generation Ultra-Fast Automation & Macro Engine for Windows 10 & 11**
 
-[![Version](https://img.shields.io/badge/Version-2026.1.0-00f2fe?style=for-the-badge&logo=electron&logoColor=white)](https://github.com/hyperclick-project/hyperclick-pro)
+[![Version](https://img.shields.io/badge/Version-2026.1.0-00f2fe?style=for-the-badge&logo=electron&logoColor=white)](https://github.com/Laknicek/hyperclick-pro)
 [![License](https://img.shields.io/badge/License-MIT-00f5a0?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-4facfe?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/hyperclick-project/hyperclick-pro/releases)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/hyperclick-project/hyperclick-pro)
-[![Precision](https://img.shields.io/badge/CPS-500%2B%20Microsecond-e100ff?style=for-the-badge&logo=speedtest&logoColor=white)](https://github.com/hyperclick-project/hyperclick-pro)
-[![UI Engine](https://img.shields.io/badge/UI-React%2019%20%7C%20Tailwind%20CSS-7f00ff?style=for-the-badge&logo=react&logoColor=white)](https://github.com/hyperclick-project/hyperclick-pro)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-4facfe?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Laknicek/hyperclick-pro/releases)
+[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/Laknicek/hyperclick-pro)
+[![Precision](https://img.shields.io/badge/CPS-500%2B%20Microsecond-e100ff?style=for-the-badge&logo=speedtest&logoColor=white)](https://github.com/Laknicek/hyperclick-pro)
+[![UI Engine](https://img.shields.io/badge/UI-React%2019%20%7C%20Tailwind%20CSS-7f00ff?style=for-the-badge&logo=react&logoColor=white)](https://github.com/Laknicek/hyperclick-pro)
 
 [Overview](#-overview) •
 [Key Features](#-key-features) •
@@ -249,7 +249,7 @@ HyperClick Pro 2026 includes 12+ pre-calibrated, tournament-tested presets engin
 
 ### Option 1: Official NSIS Installer (Recommended)
 
-1. Download the latest `HyperClick-Pro-Setup-2026.1.0.exe` from the [Releases](https://github.com/hyperclick-project/hyperclick-pro/releases) page.
+1. Download the latest `HyperClick-Pro-Setup-2026.1.0.exe` from the [Releases](https://github.com/Laknicek/hyperclick-pro/releases) page.
 2. Run the installer. Choose standard installation or select a **custom directory**.
 3. Select desired shortcuts (Desktop, Start Menu).
 4. Launch **HyperClick Pro 2026** and start clicking!
@@ -276,7 +276,7 @@ No installation or administrative privileges required. Perfect for USB drives:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/hyperclick-project/hyperclick-pro.git
+git clone https://github.com/Laknicek/hyperclick-pro.git
 cd hyperclick-pro
 
 # 2. Install dependencies
@@ -309,7 +309,7 @@ To configure manual repository endpoints, update `package.json`:
 "publish": [
   {
     "provider": "github",
-    "owner": "hyperclick-project",
+    "owner": "Laknicek",
     "repo": "hyperclick-pro"
   }
 ]
