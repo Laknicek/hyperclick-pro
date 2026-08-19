@@ -204,6 +204,8 @@ export class MacroEngine {
 
     this.notifyStateChange('stopped');
     await new Promise((resolve) => setTimeout(resolve, 50));
+    this.currentLoop = 0;
+    this.currentWaypointIndex = 0;
     this.notifyStateChange('idle');
   }
 
@@ -771,7 +773,7 @@ export class MacroEngine {
       ? this.recordedActions[this.recordedActions.length - 1].relativeTimeMs
       : 1000;
 
-    return {
+    const result: MacroSequence = {
       id: `seq_rec_${Date.now()}`,
       name,
       description: `Captured ${waypoints.length} waypoints (${this.recordedActions.length} raw events)`,
@@ -803,6 +805,9 @@ export class MacroEngine {
       updatedAt: Date.now(),
       tags: ['Recorded'],
     };
+
+    this.recordedActions = [];
+    return result;
   }
 
   // ----------------------------------------------------

@@ -45,8 +45,11 @@ export class NativeClickerEngine extends EventEmitter {
   private pingPongForward = true;
   private lastClickPos: Point2D | null = null;
 
-  // CPS sliding window tracker (timestamps in ms)
-  private clickTimestamps: number[] = [];
+  // High-performance zero-allocation rolling 1000ms CPS tracker (100 buckets x 10ms resolution)
+  private static readonly CPS_BUCKET_COUNT = 100;
+  private static readonly CPS_BUCKET_MS = 10;
+  private cpsBucketCounts = new Uint32Array(NativeClickerEngine.CPS_BUCKET_COUNT);
+  private cpsBucketKeys = new Float64Array(NativeClickerEngine.CPS_BUCKET_COUNT);
   private statusIntervalTimer: NodeJS.Timeout | null = null;
 
   // Active sleep abort handle
@@ -142,7 +145,6 @@ export class NativeClickerEngine extends EventEmitter {
             const count = parseInt(parts[1], 10);
             if (!isNaN(count)) {
               this.clicksPerformed = count;
-              this.emitStatus();
             }
             continue;
           }
@@ -373,7 +375,8 @@ export class NativeClickerEngine extends EventEmitter {
     this.startTime = Date.now();
     this.currentWaypointIndex = 0;
     this.pingPongForward = true;
-    this.clickTimestamps = [];
+    this.cpsBucketCounts.fill(0);
+    this.cpsBucketKeys.fill(-1);
     this.humanizer.reset();
 
     // Start status broadcast timer at 30Hz
@@ -414,13 +417,14 @@ export class NativeClickerEngine extends EventEmitter {
       this.statusIntervalTimer = null;
     }
 
-    // Stop native autonomous worker loop if running
-    await this.sendWorkerCommand('STOP_AUTOLOOP');
-
-    // Safety release all mouse buttons
-    await this.sendWorkerCommand('UP 0');
-    await this.sendWorkerCommand('UP 1');
-    await this.sendWorkerCommand('UP 2');
+    // Immediately stop native autonomous worker loop and release mouse buttons
+    if (this.workerProcess && this.workerProcess.stdin?.writable) {
+      try {
+        this.workerProcess.stdin.write('STOP_AUTOLOOP\nUP 0\nUP 1\nUP 2\n');
+      } catch {
+        // ignore
+      }
+    }
 
     this.emitStatus();
     this.emit('stopped');
@@ -429,24 +433,25 @@ export class NativeClickerEngine extends EventEmitter {
   }
 
   /**
-   * High-level click loop orchestrator.
+   * High-level click loop orchestrator with zero cumulative timing drift.
    */
   private async runEngineLoop(config: ClickConfig): Promise<void> {
-    const isUltraFast = config.cps >= 200 && config.locationMode !== 'waypoints' && !config.humanizer.enabled;
+    const isUltraFast = config.cps >= 100 && config.locationMode !== 'waypoints' && !config.humanizer.enabled;
 
     // Ultra-Fast Autonomous Native C# Loop optimization
     if (isUltraFast && this.workerReady) {
       const btnCode = config.clickType === 'right' ? 1 : config.clickType === 'middle' ? 2 : 0;
-      const x = config.locationMode === 'fixed' ? config.fixedX : -1;
-      const y = config.locationMode === 'fixed' ? config.fixedY : -1;
-      const intervalUs = Math.max(1, Math.round(1000000 / config.cps));
+      const x = config.locationMode === 'fixed' ? config.fixedX : (config.locationMode === 'area' && config.area ? Math.round(config.area.x + config.area.width / 2) : -1);
+      const y = config.locationMode === 'fixed' ? config.fixedY : (config.locationMode === 'area' && config.area ? Math.round(config.area.y + config.area.height / 2) : -1);
+      const intervalUs = Math.max(1, Math.round(1_000_000 / config.cps));
       const maxClicks = config.repeatMode === 'count' ? config.repeatCount : 0;
 
       await this.sendWorkerCommand(`START_AUTOLOOP ${btnCode} ${x} ${y} ${intervalUs} ${maxClicks} 0`);
       return;
     }
 
-    // Precise TypeScript orchestration loop with Humanizer, Waypoints, Bézier, Jitter
+    // Monotonic nanosecond schedule anchor for ZERO cumulative drift
+    let nextDeadlineNs = process.hrtime.bigint();
     let waypointLoopsCompleted = 0;
 
     while (this.isRunning && !this.stopRequested) {
@@ -462,6 +467,7 @@ export class NativeClickerEngine extends EventEmitter {
       const microBreakMs = this.humanizer.checkMicroBreak(config.humanizer);
       if (microBreakMs > 0) {
         await this.hrSleep(microBreakMs);
+        nextDeadlineNs = process.hrtime.bigint();
         if (this.stopRequested) break;
       }
 
@@ -482,6 +488,7 @@ export class NativeClickerEngine extends EventEmitter {
             break;
           }
         }
+        nextDeadlineNs = process.hrtime.bigint();
         continue;
       }
 
@@ -513,14 +520,28 @@ export class NativeClickerEngine extends EventEmitter {
         }
       }
 
+      // Compute interval for this iteration
+      const baseInterval = config.clickIntervalMs > 0 ? config.clickIntervalMs : 1000 / Math.max(0.1, config.cps);
+      const nextIntervalMs = this.humanizer.calculateNextInterval(baseInterval, config.humanizer);
+      const intervalNs = BigInt(Math.max(1, Math.round(nextIntervalMs * 1_000_000)));
+
       // Execute Action
       await this.executeAction(config.clickType, targetX, targetY, config);
 
-      // Compute next interval with humanizer variance
-      const baseInterval = config.clickIntervalMs > 0 ? config.clickIntervalMs : 1000 / Math.max(0.1, config.cps);
-      const nextInterval = this.humanizer.calculateNextInterval(baseInterval, config.humanizer);
+      // Advance next monotonic deadline
+      nextDeadlineNs += intervalNs;
+      const nowNs = process.hrtime.bigint();
+      const remainingNs = nextDeadlineNs - nowNs;
 
-      await this.hrSleep(nextInterval);
+      if (remainingNs > 0n) {
+        await this.hrSleepNs(remainingNs);
+      } else {
+        // If we fell behind by more than 2 intervals, resync to avoid runaway burst
+        if (nowNs - nextDeadlineNs > intervalNs * 2n) {
+          nextDeadlineNs = nowNs;
+        }
+        await new Promise<void>((r) => setImmediate(r));
+      }
     }
 
     if (this.isRunning) {
@@ -666,10 +687,10 @@ export class NativeClickerEngine extends EventEmitter {
 
   /**
    * High-Resolution microsecond sleep utility using process.hrtime.bigint() and hybrid spin-wait.
-   * Handles intervals from 1µs (0.001ms) up to 999 hours cleanly and supports instant abort.
+   * Handles intervals from 1µs (1,000ns) up to hours cleanly and supports instant abort.
    */
-  public hrSleep(ms: number): Promise<void> {
-    if (ms <= 0.001 || this.stopRequested) return Promise.resolve();
+  public hrSleepNs(nanoseconds: bigint): Promise<void> {
+    if (nanoseconds <= 1_000n || this.stopRequested) return Promise.resolve();
 
     return new Promise((resolve) => {
       let resolved = false;
@@ -686,11 +707,12 @@ export class NativeClickerEngine extends EventEmitter {
       this.activeSleepResolver = safeResolve;
 
       const startNs = process.hrtime.bigint();
-      const targetNs = BigInt(Math.round(Math.max(0, ms) * 1_000_000));
+      const targetNs = nanoseconds;
+      const remainingMs = Number(nanoseconds) / 1_000_000;
 
-      if (ms > 20) {
-        // Sleep in chunks of max 25ms to check stopRequested and allow prompt cancellation
-        const checkChunk = () => {
+      if (remainingMs > 4) {
+        const sleepChunk = Math.max(1, Math.min(25, Math.floor(remainingMs - 2)));
+        this.activeSleepTimeout = setTimeout(() => {
           if (this.stopRequested || resolved) {
             safeResolve();
             return;
@@ -698,59 +720,53 @@ export class NativeClickerEngine extends EventEmitter {
 
           const elapsedNs = process.hrtime.bigint() - startNs;
           const remainingNs = targetNs - elapsedNs;
-
-          if (remainingNs <= 0) {
-            safeResolve();
-            return;
-          }
-
-          const remainingMs = Number(remainingNs) / 1_000_000;
-          if (remainingMs > 4) {
-            const nextSleep = Math.min(25, Math.floor(remainingMs - 2));
-            this.activeSleepTimeout = setTimeout(checkChunk, Math.max(1, nextSleep));
-          } else {
-            // Final microsecond spinwait
+          if (remainingNs > 0n) {
             while (process.hrtime.bigint() - startNs < targetNs) {
               if (this.stopRequested) break;
             }
-            safeResolve();
           }
-        };
-
-        const initialSleep = Math.min(25, Math.floor(ms - 2));
-        this.activeSleepTimeout = setTimeout(checkChunk, Math.max(1, initialSleep));
-      } else if (ms > 3) {
+          safeResolve();
+        }, sleepChunk);
+      } else if (remainingMs > 1.5) {
         this.activeSleepTimeout = setTimeout(() => {
           while (process.hrtime.bigint() - startNs < targetNs) {
             if (this.stopRequested) break;
           }
           safeResolve();
-        }, Math.floor(ms - 2));
+        }, 1);
       } else {
-        setImmediate(() => {
-          while (process.hrtime.bigint() - startNs < targetNs) {
-            if (this.stopRequested) break;
-          }
-          safeResolve();
-        });
+        // Sub-millisecond spin-wait tail
+        while (process.hrtime.bigint() - startNs < targetNs) {
+          if (this.stopRequested) break;
+        }
+        safeResolve();
       }
     });
   }
 
   /**
-   * Records click event for CPS sliding-window analytics with memory limit safeguard.
+   * High-Resolution microsecond sleep utility in milliseconds.
+   */
+  public hrSleep(ms: number): Promise<void> {
+    if (ms <= 0.001 || this.stopRequested) return Promise.resolve();
+    const ns = BigInt(Math.max(0, Math.round(ms * 1_000_000)));
+    return this.hrSleepNs(ns);
+  }
+
+  /**
+   * Records click event for CPS sliding-window analytics with zero memory allocation.
    */
   private recordClickEvent(x?: number, y?: number, count = 1): void {
     const now = Date.now();
-    for (let i = 0; i < count; i++) {
-      this.clickTimestamps.push(now);
-      this.clicksPerformed++;
-    }
+    this.clicksPerformed += count;
 
-    // Limit memory size of timestamp buffer (max 30,000 entries)
-    if (this.clickTimestamps.length > 30000) {
-      const cutoff = now - 1000;
-      this.clickTimestamps = this.clickTimestamps.filter((t) => t >= cutoff);
+    const bucketKey = Math.floor(now / NativeClickerEngine.CPS_BUCKET_MS);
+    const idx = bucketKey % NativeClickerEngine.CPS_BUCKET_COUNT;
+    if (this.cpsBucketKeys[idx] !== bucketKey) {
+      this.cpsBucketKeys[idx] = bucketKey;
+      this.cpsBucketCounts[idx] = count;
+    } else {
+      this.cpsBucketCounts[idx] += count;
     }
 
     if (x !== undefined && y !== undefined) {
@@ -762,29 +778,21 @@ export class NativeClickerEngine extends EventEmitter {
   }
 
   /**
-   * Calculates actual rolling CPS in the last 1000ms window with efficient pruning.
+   * Calculates actual rolling CPS in the last 1000ms window with zero garbage collection.
    */
   public getActualCPS(): number {
     const now = Date.now();
-    const cutoff = now - 1000;
+    const currentKey = Math.floor(now / NativeClickerEngine.CPS_BUCKET_MS);
+    let total = 0;
 
-    // Fast binary search or slice pruning
-    if (this.clickTimestamps.length > 0 && this.clickTimestamps[0] < cutoff) {
-      let firstValid = -1;
-      for (let i = 0; i < this.clickTimestamps.length; i++) {
-        if (this.clickTimestamps[i] >= cutoff) {
-          firstValid = i;
-          break;
-        }
-      }
-      if (firstValid > 0) {
-        this.clickTimestamps.splice(0, firstValid);
-      } else if (firstValid === -1) {
-        this.clickTimestamps = [];
+    for (let i = 0; i < NativeClickerEngine.CPS_BUCKET_COUNT; i++) {
+      const keyDiff = currentKey - this.cpsBucketKeys[i];
+      if (keyDiff >= 0 && keyDiff < NativeClickerEngine.CPS_BUCKET_COUNT) {
+        total += this.cpsBucketCounts[i];
       }
     }
 
-    return this.clickTimestamps.length;
+    return total;
   }
 
   /**

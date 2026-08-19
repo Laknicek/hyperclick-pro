@@ -23,6 +23,7 @@ export interface TrajectoryPoint extends Point2D {
 export class GaussianDistribution {
   private static hasSpare = false;
   private static spareValue = 0;
+  private static readonly TWO_PI = 2.0 * Math.PI;
 
   /**
    * Generates a standard normal random variable N(0, 1) via the Box-Muller transform.
@@ -39,7 +40,7 @@ export class GaussianDistribution {
     while (v === 0) v = Math.random();
 
     const radius = Math.sqrt(-2.0 * Math.log(u));
-    const theta = 2.0 * Math.PI * v;
+    const theta = this.TWO_PI * v;
 
     this.spareValue = radius * Math.sin(theta);
     this.hasSpare = true;
@@ -85,7 +86,7 @@ export class GaussianDistribution {
     while (u === 0) u = Math.random();
     
     const r = Math.min(maxRadius, sigma * Math.sqrt(-2.0 * Math.log(u)));
-    const theta = Math.random() * 2.0 * Math.PI;
+    const theta = Math.random() * this.TWO_PI;
 
     return {
       dx: Math.round(r * Math.cos(theta)),
@@ -287,10 +288,10 @@ export class FatigueTracker {
   }
 
   public recordClick(): void {
-    this.continuousClicks++;
+    this.continuousClicks = Math.min(100_000_000, this.continuousClicks + 1);
     // Subtle logarithmic fatigue accumulation
     const elapsedMinutes = (Date.now() - this.startTime) / 60000;
-    this.fatigueFactor = Math.min(1.0, (Math.log1p(this.continuousClicks / 100) * 0.15) + (elapsedMinutes * 0.05));
+    this.fatigueFactor = Math.max(0.0, Math.min(1.0, (Math.log1p(this.continuousClicks / 100) * 0.15) + (elapsedMinutes * 0.05)));
   }
 
   public recordBreak(breakDurationMs: number): void {
@@ -332,7 +333,7 @@ export class HumanizerEngine {
 
   public reset(): void {
     this.fatigue.reset();
-    this.noiseStep = Math.random() * 100;
+    this.noiseStep = (Math.random() * 100) % 256;
   }
 
   public recordClick(): void {
@@ -355,7 +356,7 @@ export class HumanizerEngine {
       return baseIntervalMs;
     }
 
-    this.noiseStep += 0.08;
+    this.noiseStep = (this.noiseStep + 0.08) % 256;
     let interval = baseIntervalMs;
 
     // 1. Fatigue drift

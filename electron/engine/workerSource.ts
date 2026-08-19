@@ -124,11 +124,38 @@ namespace HyperClick.Native
 
         #endregion
 
+        private static readonly int INPUT_SIZE = Marshal.SizeOf(typeof(INPUT));
         private static long _frequency = 0;
         private static volatile bool _autoLoopRunning = false;
         private static Thread _autoLoopThread = null;
         private static readonly object _loopLock = new object();
-        private static Random _rng = new Random();
+        private static readonly Random _rng = new Random();
+
+        // Pre-allocated static reusable INPUT structures to eliminate managed GC heap allocations
+        private static readonly INPUT[] _leftDownInputs = new INPUT[1] { CreateMouseInput(MOUSEEVENTF_LEFTDOWN) };
+        private static readonly INPUT[] _leftUpInputs = new INPUT[1] { CreateMouseInput(MOUSEEVENTF_LEFTUP) };
+        private static readonly INPUT[] _rightDownInputs = new INPUT[1] { CreateMouseInput(MOUSEEVENTF_RIGHTDOWN) };
+        private static readonly INPUT[] _rightUpInputs = new INPUT[1] { CreateMouseInput(MOUSEEVENTF_RIGHTUP) };
+        private static readonly INPUT[] _middleDownInputs = new INPUT[1] { CreateMouseInput(MOUSEEVENTF_MIDDLEDOWN) };
+        private static readonly INPUT[] _middleUpInputs = new INPUT[1] { CreateMouseInput(MOUSEEVENTF_MIDDLEUP) };
+
+        // Pre-allocated atomic single-call click inputs (Down + Up in one SendInput call for max throughput)
+        private static readonly INPUT[] _leftClickAtomic = new INPUT[2] { CreateMouseInput(MOUSEEVENTF_LEFTDOWN), CreateMouseInput(MOUSEEVENTF_LEFTUP) };
+        private static readonly INPUT[] _rightClickAtomic = new INPUT[2] { CreateMouseInput(MOUSEEVENTF_RIGHTDOWN), CreateMouseInput(MOUSEEVENTF_RIGHTUP) };
+        private static readonly INPUT[] _middleClickAtomic = new INPUT[2] { CreateMouseInput(MOUSEEVENTF_MIDDLEDOWN), CreateMouseInput(MOUSEEVENTF_MIDDLEUP) };
+
+        private static INPUT CreateMouseInput(uint flags)
+        {
+            INPUT input = new INPUT();
+            input.type = INPUT_MOUSE;
+            input.u.mi.dwFlags = flags;
+            input.u.mi.dx = 0;
+            input.u.mi.dy = 0;
+            input.u.mi.mouseData = 0;
+            input.u.mi.time = 0;
+            input.u.mi.dwExtraInfo = UIntPtr.Zero;
+            return input;
+        }
 
         public static void Main(string[] args)
         {
@@ -191,13 +218,18 @@ namespace HyperClick.Native
                     IntPtr hdc = GetDC(IntPtr.Zero);
                     if (hdc != IntPtr.Zero)
                     {
-                        uint colorRef = GetPixel(hdc, px, py);
-                        ReleaseDC(IntPtr.Zero, hdc);
-
-                        byte r = (byte)(colorRef & 0x000000FF);
-                        byte g = (byte)((colorRef & 0x0000FF00) >> 8);
-                        byte b = (byte)((colorRef & 0x00FF0000) >> 16);
-                        Console.WriteLine(string.Format("COLOR #{0:X2}{1:X2}{2:X2}", r, g, b));
+                        try
+                        {
+                            uint colorRef = GetPixel(hdc, px, py);
+                            byte r = (byte)(colorRef & 0x000000FF);
+                            byte g = (byte)((colorRef & 0x0000FF00) >> 8);
+                            byte b = (byte)((colorRef & 0x00FF0000) >> 16);
+                            Console.WriteLine(string.Format("COLOR #{0:X2}{1:X2}{2:X2}", r, g, b));
+                        }
+                        finally
+                        {
+                            ReleaseDC(IntPtr.Zero, hdc);
+                        }
                     }
                     else
                     {
@@ -294,6 +326,8 @@ namespace HyperClick.Native
                     Console.WriteLine("OK");
                     break;
 
+                case "STOP":
+                case "KILL":
                 case "STOP_AUTOLOOP":
                     StopAutonomousLoop();
                     Console.WriteLine("OK");
@@ -313,26 +347,20 @@ namespace HyperClick.Native
 
         private static void SendButtonDown(int btn)
         {
-            uint flag = MOUSEEVENTF_LEFTDOWN;
-            if (btn == 1) flag = MOUSEEVENTF_RIGHTDOWN;
-            else if (btn == 2) flag = MOUSEEVENTF_MIDDLEDOWN;
-
-            INPUT[] inputs = new INPUT[1];
-            inputs[0].type = INPUT_MOUSE;
-            inputs[0].u.mi.dwFlags = flag;
-            SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
+            INPUT[] inputs = btn == 1 ? _rightDownInputs : (btn == 2 ? _middleDownInputs : _leftDownInputs);
+            SendInput(1, inputs, INPUT_SIZE);
         }
 
         private static void SendButtonUp(int btn)
         {
-            uint flag = MOUSEEVENTF_LEFTUP;
-            if (btn == 1) flag = MOUSEEVENTF_RIGHTUP;
-            else if (btn == 2) flag = MOUSEEVENTF_MIDDLEUP;
+            INPUT[] inputs = btn == 1 ? _rightUpInputs : (btn == 2 ? _middleUpInputs : _leftUpInputs);
+            SendInput(1, inputs, INPUT_SIZE);
+        }
 
-            INPUT[] inputs = new INPUT[1];
-            inputs[0].type = INPUT_MOUSE;
-            inputs[0].u.mi.dwFlags = flag;
-            SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
+        private static void SendAtomicClick(int btn)
+        {
+            INPUT[] inputs = btn == 1 ? _rightClickAtomic : (btn == 2 ? _middleClickAtomic : _leftClickAtomic);
+            SendInput(2, inputs, INPUT_SIZE);
         }
 
         private static void StartAutonomousLoop(int btn, int x, int y, long intervalUs, long maxClicks, int jitterRadius)
@@ -350,90 +378,122 @@ namespace HyperClick.Native
                     long nextTicks = startTicks;
                     long ticksPerMicro = Math.Max(1, _frequency / 1000000);
                     long intervalTicks = Math.Max(1, intervalUs * ticksPerMicro);
-                    long holdTicks = Math.Max(ticksPerMicro * 50, Math.Min(ticksPerMicro * 1500, intervalTicks / 3));
+                    
+                    // For ultra-fast rates (> 1000 CPS, interval < 1000us), use sub-micro hold or atomic click
+                    bool isUltraHighFreq = intervalUs < 1000;
+                    long holdTicks = isUltraHighFreq
+                        ? Math.Max(1, Math.Min(ticksPerMicro * 100, intervalTicks / 4))
+                        : Math.Max(ticksPerMicro * 50, Math.Min(ticksPerMicro * 1500, intervalTicks / 3));
 
                     long lastReportTicks = startTicks;
                     long reportIntervalTicks = _frequency / 30; // 30Hz status reports
 
                     bool useFixedPos = (x >= 0 && y >= 0);
 
-                    while (_autoLoopRunning && (maxClicks <= 0 || performed < maxClicks))
+                    try
                     {
-                        if (useFixedPos)
+                        while (_autoLoopRunning && (maxClicks <= 0 || performed < maxClicks))
                         {
-                            if (jitterRadius > 0)
+                            if (useFixedPos)
                             {
-                                int jx = x + _rng.Next(-jitterRadius, jitterRadius + 1);
-                                int jy = y + _rng.Next(-jitterRadius, jitterRadius + 1);
-                                SetCursorPos(jx, jy);
+                                if (jitterRadius > 0)
+                                {
+                                    int jx = x + _rng.Next(-jitterRadius, jitterRadius + 1);
+                                    int jy = y + _rng.Next(-jitterRadius, jitterRadius + 1);
+                                    SetCursorPos(jx, jy);
+                                }
+                                else
+                                {
+                                    SetCursorPos(x, y);
+                                }
+                            }
+
+                            if (isUltraHighFreq && holdTicks <= 5 * ticksPerMicro)
+                            {
+                                // Single atomic SendInput (Down + Up)
+                                SendAtomicClick(btn);
                             }
                             else
                             {
-                                SetCursorPos(x, y);
+                                // Click Down
+                                SendButtonDown(btn);
+
+                                // Micro hold
+                                long downTicks;
+                                QueryPerformanceCounter(out downTicks);
+                                long targetUpTicks = downTicks + holdTicks;
+                                while (_autoLoopRunning)
+                                {
+                                    long cur;
+                                    QueryPerformanceCounter(out cur);
+                                    if (cur >= targetUpTicks) break;
+                                    Thread.SpinWait(10);
+                                }
+
+                                // Click Up
+                                SendButtonUp(btn);
                             }
-                        }
 
-                        // Click Down
-                        SendButtonDown(btn);
+                            performed++;
 
-                        // Micro hold
-                        long downTicks;
-                        QueryPerformanceCounter(out downTicks);
-                        long targetUpTicks = downTicks + holdTicks;
-                        while (true)
-                        {
-                            long cur;
-                            QueryPerformanceCounter(out cur);
-                            if (cur >= targetUpTicks || !_autoLoopRunning) break;
-                            Thread.SpinWait(10);
-                        }
-
-                        // Click Up
-                        SendButtonUp(btn);
-                        performed++;
-
-                        // Schedule next click
-                        nextTicks += intervalTicks;
-                        long curTicks;
-                        QueryPerformanceCounter(out curTicks);
-
-                        // If behind, reset nextTicks to avoid runaway burst
-                        if (curTicks > nextTicks + intervalTicks)
-                        {
-                            nextTicks = curTicks + intervalTicks;
-                        }
-
-                        // Report progress periodically
-                        if (curTicks - lastReportTicks >= reportIntervalTicks)
-                        {
-                            double elapsedSec = (double)(curTicks - startTicks) / _frequency;
-                            double cps = elapsedSec > 0 ? (performed / elapsedSec) : 0;
-                            Console.WriteLine(string.Format("PROGRESS {0} {1:F1}", performed, cps));
-                            lastReportTicks = curTicks;
-                        }
-
-                        // High-precision adaptive wait for next click
-                        while (_autoLoopRunning)
-                        {
+                            // Schedule next click
+                            nextTicks += intervalTicks;
+                            long curTicks;
                             QueryPerformanceCounter(out curTicks);
-                            long remainingTicks = nextTicks - curTicks;
-                            if (remainingTicks <= 0) break;
 
-                            long remainingMs = (remainingTicks * 1000) / _frequency;
-                            if (remainingMs > 3)
+                            // If behind by more than 2 intervals, reset nextTicks to avoid runaway bursts
+                            if (curTicks > nextTicks + (intervalTicks * 2))
                             {
-                                int sleepSlice = (int)Math.Min(10, remainingMs - 2);
-                                Thread.Sleep(Math.Max(1, sleepSlice));
+                                nextTicks = curTicks + intervalTicks;
                             }
-                            else
+
+                            // Report progress periodically (at ~30Hz)
+                            if (curTicks - lastReportTicks >= reportIntervalTicks)
                             {
-                                Thread.SpinWait(30);
+                                double elapsedSec = (double)(curTicks - startTicks) / _frequency;
+                                double cps = elapsedSec > 0 ? (performed / elapsedSec) : 0;
+                                Console.WriteLine(string.Format("PROGRESS {0} {1:F1}", performed, cps));
+                                lastReportTicks = curTicks;
+                            }
+
+                            // High-precision adaptive wait for next click deadline
+                            while (_autoLoopRunning)
+                            {
+                                QueryPerformanceCounter(out curTicks);
+                                long remainingTicks = nextTicks - curTicks;
+                                if (remainingTicks <= 0) break;
+
+                                long remainingMs = (remainingTicks * 1000) / _frequency;
+                                if (remainingMs > 4)
+                                {
+                                    int sleepSlice = (int)Math.Min(20, remainingMs - 2);
+                                    Thread.Sleep(Math.Max(1, sleepSlice));
+                                }
+                                else if (remainingMs > 1)
+                                {
+                                    Thread.Sleep(1);
+                                }
+                                else
+                                {
+                                    Thread.SpinWait(20);
+                                }
                             }
                         }
                     }
-
-                    _autoLoopRunning = false;
-                    SendButtonUp(btn); // Safety release
+                    catch (ThreadInterruptedException)
+                    {
+                        // Expected clean interrupt on stop
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("ERR " + ex.Message);
+                    }
+                    finally
+                    {
+                        _autoLoopRunning = false;
+                        // Safety release on loop termination
+                        SendButtonUp(btn);
+                    }
 
                     long endTicks;
                     QueryPerformanceCounter(out endTicks);
@@ -457,9 +517,27 @@ namespace HyperClick.Native
                 _autoLoopRunning = false;
                 if (_autoLoopThread != null && _autoLoopThread.IsAlive)
                 {
-                    _autoLoopThread.Join(300);
+                    try
+                    {
+                        _autoLoopThread.Interrupt();
+                    }
+                    catch { }
+
+                    if (!_autoLoopThread.Join(150))
+                    {
+                        try
+                        {
+                            _autoLoopThread.Abort();
+                        }
+                        catch { }
+                    }
                     _autoLoopThread = null;
                 }
+
+                // Immediate safety release of all mouse buttons
+                SendButtonUp(0);
+                SendButtonUp(1);
+                SendButtonUp(2);
             }
         }
 
@@ -468,20 +546,25 @@ namespace HyperClick.Native
             if (microseconds <= 0) return;
             long start;
             QueryPerformanceCounter(out start);
-            long targetTicks = start + (microseconds * (_frequency / 1000000));
+            long ticksPerMicro = Math.Max(1, _frequency / 1000000);
+            long targetTicks = start + (microseconds * ticksPerMicro);
 
             while (true)
             {
                 long current;
                 QueryPerformanceCounter(out current);
-                if (current >= targetTicks) break;
-
                 long remainingTicks = targetTicks - current;
+                if (remainingTicks <= 0) break;
+
                 long remainingMs = (remainingTicks * 1000) / _frequency;
-                if (remainingMs > 3)
+                if (remainingMs > 4)
                 {
-                    int sleepSlice = (int)Math.Min(10, remainingMs - 2);
+                    int sleepSlice = (int)Math.Min(20, remainingMs - 2);
                     Thread.Sleep(Math.Max(1, sleepSlice));
+                }
+                else if (remainingMs > 1)
+                {
+                    Thread.Sleep(1);
                 }
                 else
                 {

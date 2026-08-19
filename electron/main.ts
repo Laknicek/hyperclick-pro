@@ -65,6 +65,21 @@ class HyperClickApplication {
   private lastKnownConfig: ClickConfig | null = null;
   private isPickingCoordinate = false;
   private isShuttingDown = false;
+  private sharedState: {
+    activeProfileName: string;
+    config: ClickConfig | null;
+    targetCps: number;
+    hotkeys: any;
+    isAlwaysOnTop: boolean;
+    isMuted: boolean;
+  } = {
+    activeProfileName: 'Default Profile',
+    config: null,
+    targetCps: 20,
+    hotkeys: DEFAULT_SETTINGS.hotkeys,
+    isAlwaysOnTop: true,
+    isMuted: false,
+  };
 
   constructor() {
     this.engine = new NativeClickerEngine();
@@ -306,18 +321,23 @@ class HyperClickApplication {
     const isDev = !app.isPackaged;
     const preloadPath = path.join(__dirname, 'preload.js');
     const primaryDisplay = screen.getPrimaryDisplay();
-    const { width } = primaryDisplay.workAreaSize;
+    const { width: workWidth, x: workX, y: workY } = primaryDisplay.workArea;
+
+    const hudWidth = 380;
+    const hudHeight = 135;
+    const hudX = Math.max(workX + 16, workX + workWidth - hudWidth - 24);
+    const hudY = Math.max(workY + 16, workY + 60);
 
     this.miniHudWindow = new BrowserWindow({
-      width: 290,
-      height: 130,
-      x: width - 320,
-      y: 50,
+      width: hudWidth,
+      height: hudHeight,
+      x: hudX,
+      y: hudY,
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
       alwaysOnTop: true,
-      skipTaskbar: true,
+      skipTaskbar: false,
       resizable: false,
       hasShadow: true,
       show: false,
@@ -330,13 +350,23 @@ class HyperClickApplication {
       },
     });
 
-    this.miniHudWindow.setAlwaysOnTop(true, 'floating');
+    this.miniHudWindow.setAlwaysOnTop(true, 'screen-saver');
+    this.miniHudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
     const hudUrl = isDev
       ? `${process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'}#/mini-hud`
       : `file://${path.join(__dirname, '../dist/index.html')}#/mini-hud`;
 
     this.miniHudWindow.loadURL(hudUrl);
+
+    // Prevent destruction on close, hide instead unless app is shutting down
+    this.miniHudWindow.on('close', (e) => {
+      if (!this.isShuttingDown) {
+        e.preventDefault();
+        this.miniHudWindow?.hide();
+        this.broadcast('mini-hud-state-changed', false);
+      }
+    });
 
     this.miniHudWindow.on('closed', () => {
       this.miniHudWindow = null;
@@ -624,6 +654,9 @@ class HyperClickApplication {
     // Start Clicker (support clicker:start and start-clicker)
     const handleStart = async (_event: any, config: ClickConfig) => {
       this.lastKnownConfig = config;
+      this.sharedState.config = config;
+      if (config.cps) this.sharedState.targetCps = config.cps;
+      this.broadcast('state-synced', this.sharedState);
       return await this.engine.start(config);
     };
     handleSafe('clicker:start', handleStart);
@@ -636,6 +669,12 @@ class HyperClickApplication {
     handleSafe('clicker:stop', handleStop);
     handleSafe('stop-clicker', handleStop);
 
+    // Toggle Clicker
+    handleSafe('clicker:toggle', async () => {
+      await this.toggleClicker();
+      return this.engine.getStatus();
+    });
+
     // Get Status (support clicker:get-status, clicker:status, get-status)
     const handleGetStatus = async () => {
       return this.engine.getStatus();
@@ -643,6 +682,26 @@ class HyperClickApplication {
     handleSafe('clicker:get-status', handleGetStatus);
     handleSafe('clicker:status', handleGetStatus);
     handleSafe('get-status', handleGetStatus);
+
+    // State Synchronization
+    handleSafe('state:sync', async (_event: any, stateUpdate: any) => {
+      this.sharedState = { ...this.sharedState, ...stateUpdate };
+      if (stateUpdate?.config) {
+        this.lastKnownConfig = stateUpdate.config;
+      }
+      this.broadcast('state-synced', this.sharedState);
+      return true;
+    });
+
+    handleSafe('state:get-full', async () => {
+      return {
+        engineStatus: this.engine.getStatus(),
+        sharedState: this.sharedState,
+        settings: this.settings,
+        isMiniHudVisible: !!this.miniHudWindow?.isVisible(),
+        isOverlayVisible: !!this.overlayWindow?.isVisible(),
+      };
+    });
 
     // Pick Coordinates (support coordinate:pick, clicker:pick-coords, pick-coordinates)
     const handlePickCoords = async () => {
@@ -682,6 +741,48 @@ class HyperClickApplication {
     };
     handleSafe('mini-hud:toggle', handleToggleMiniHud);
     handleSafe('toggle-mini-hud', handleToggleMiniHud);
+
+    // Popout Mini HUD
+    handleSafe('mini-hud:popout', async (_event: any, minimizeMain?: boolean) => {
+      if (!this.miniHudWindow || this.miniHudWindow.isDestroyed()) {
+        this.createMiniHudWindow();
+      }
+      this.miniHudWindow?.show();
+      this.miniHudWindow?.focus();
+      this.miniHudWindow?.setAlwaysOnTop(true, 'screen-saver');
+
+      if (minimizeMain && this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.minimize();
+      }
+      this.broadcast('mini-hud-state-changed', true);
+      return true;
+    });
+
+    // Expand Mini HUD back to Main Dashboard Window
+    handleSafe('mini-hud:expand', async () => {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        if (this.mainWindow.isMinimized()) {
+          this.mainWindow.restore();
+        }
+        this.mainWindow.show();
+        this.mainWindow.focus();
+      }
+      if (this.miniHudWindow && !this.miniHudWindow.isDestroyed()) {
+        this.miniHudWindow.hide();
+      }
+      this.broadcast('mini-hud-state-changed', false);
+      return true;
+    });
+
+    // Mini HUD Always On Top
+    handleSafe('mini-hud:set-always-on-top', async (_event: any, enabled: boolean) => {
+      this.sharedState.isAlwaysOnTop = !!enabled;
+      if (this.miniHudWindow && !this.miniHudWindow.isDestroyed()) {
+        this.miniHudWindow.setAlwaysOnTop(!!enabled, 'screen-saver');
+        this.broadcast('mini-hud-always-on-top-changed', !!enabled);
+      }
+      return !!enabled;
+    });
 
     // Window Controls
     handleSafe('window:minimize', async (event: any) => {

@@ -163,6 +163,7 @@ export interface IElectronAPI {
   // Clicker Engine
   startClicker: (config: ClickConfig) => Promise<{ success: boolean; error?: string }>;
   stopClicker: () => Promise<{ success: boolean }>;
+  toggleClickerEngine?: () => Promise<EngineStatus>;
   getStatus: () => Promise<EngineStatus>;
 
   // Coordinates & Waypoints
@@ -173,12 +174,25 @@ export interface IElectronAPI {
   // Window & Overlays
   toggleOverlay: (show?: boolean) => Promise<boolean>;
   toggleMiniHud: (show?: boolean) => Promise<boolean>;
+  popoutMiniHud?: (minimizeMain?: boolean) => Promise<boolean>;
+  expandMiniHud?: () => Promise<boolean>;
+  setMiniHudAlwaysOnTop?: (enabled: boolean) => Promise<boolean>;
   setAlwaysOnTop: (enabled: boolean) => Promise<boolean>;
   isAlwaysOnTop: () => Promise<boolean>;
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;
   windowDrag: (deltaX: number, deltaY: number) => Promise<void>;
+
+  // State Sync
+  syncState?: (state: any) => Promise<boolean>;
+  getFullState?: () => Promise<{
+    engineStatus: EngineStatus;
+    sharedState: any;
+    settings: AppSettings;
+    isMiniHudVisible: boolean;
+    isOverlayVisible: boolean;
+  }>;
 
   // Settings & System
   getSettings: () => Promise<AppSettings>;
@@ -207,12 +221,16 @@ export interface IElectronAPI {
   onCoordinatePicked: (callback: (coords: CoordinateResult) => void) => () => void;
   onOverlayStateChanged: (callback: (visible: boolean) => void) => () => void;
   onMiniHudStateChanged: (callback: (visible: boolean) => void) => () => void;
+  onMiniHudAlwaysOnTopChanged?: (callback: (enabled: boolean) => void) => () => void;
   onAlwaysOnTopChanged: (callback: (enabled: boolean) => void) => () => void;
+  onStateSynced?: (callback: (state: any) => void) => () => void;
   onUpdateDownloadProgress?: (callback: (progress: { transferredBytes: number; totalBytes: number; percent: number; speedBytesPerSec: number }) => void) => () => void;
 }
 
 declare global {
   interface Window {
     electronAPI: IElectronAPI;
+    electron?: IElectronAPI;
   }
 }
+

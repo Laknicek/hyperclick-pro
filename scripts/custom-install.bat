@@ -8,7 +8,7 @@ color 0B
 :: ============================================================================
 
 set "APP_NAME=HyperClick Pro"
-set "APP_VERSION=1.0.0"
+set "APP_VERSION=1.2.0"
 set "APP_EXE=HyperClick Pro.exe"
 set "PUBLISHER=HyperClick Engineering"
 set "REG_KEY=HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\HyperClickPro"

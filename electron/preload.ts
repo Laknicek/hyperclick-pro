@@ -43,6 +43,15 @@ const electronAPI: IElectronAPI = {
   toggleMiniHud: (show?: boolean): Promise<boolean> =>
     ipcRenderer.invoke('mini-hud:toggle', show),
 
+  popoutMiniHud: (minimizeMain?: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('mini-hud:popout', minimizeMain),
+
+  expandMiniHud: (): Promise<boolean> =>
+    ipcRenderer.invoke('mini-hud:expand'),
+
+  setMiniHudAlwaysOnTop: (enabled: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('mini-hud:set-always-on-top', enabled),
+
   setAlwaysOnTop: (enabled: boolean): Promise<boolean> =>
     ipcRenderer.invoke('window:set-always-on-top', enabled),
 
@@ -60,6 +69,17 @@ const electronAPI: IElectronAPI = {
 
   windowDrag: (deltaX: number, deltaY: number): Promise<void> =>
     ipcRenderer.invoke('window:drag', { deltaX, deltaY }),
+
+  // State Sync
+  syncState: (state: any): Promise<boolean> =>
+    ipcRenderer.invoke('state:sync', state),
+
+  getFullState: (): Promise<any> =>
+    ipcRenderer.invoke('state:get-full'),
+
+  // Clicker Engine Extra
+  toggleClickerEngine: (): Promise<EngineStatus> =>
+    ipcRenderer.invoke('clicker:toggle'),
 
   // Settings & System
   getSettings: (): Promise<AppSettings> =>
@@ -121,10 +141,22 @@ const electronAPI: IElectronAPI = {
     return () => ipcRenderer.removeListener('mini-hud-state-changed', handler);
   },
 
+  onMiniHudAlwaysOnTopChanged: (callback: (enabled: boolean) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, enabled: boolean) => callback(enabled);
+    ipcRenderer.on('mini-hud-always-on-top-changed', handler);
+    return () => ipcRenderer.removeListener('mini-hud-always-on-top-changed', handler);
+  },
+
   onAlwaysOnTopChanged: (callback: (enabled: boolean) => void): (() => void) => {
     const handler = (_event: IpcRendererEvent, enabled: boolean) => callback(enabled);
     ipcRenderer.on('always-on-top-changed', handler);
     return () => ipcRenderer.removeListener('always-on-top-changed', handler);
+  },
+
+  onStateSynced: (callback: (state: any) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, state: any) => callback(state);
+    ipcRenderer.on('state-synced', handler);
+    return () => ipcRenderer.removeListener('state-synced', handler);
   },
 
   onUpdateDownloadProgress: (callback: (progress: { transferredBytes: number; totalBytes: number; percent: number; speedBytesPerSec: number }) => void): (() => void) => {
@@ -135,3 +167,5 @@ const electronAPI: IElectronAPI = {
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
+contextBridge.exposeInMainWorld('electron', electronAPI);
+

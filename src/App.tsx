@@ -166,48 +166,231 @@ export const App: React.FC = () => {
     }
   }, [addToast]);
 
+  const isElectron = typeof window !== 'undefined' && !!(window.electronAPI || (window as any).electron);
+
+  // Safe Electron API Accessor
+  const getElectronAPI = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      if (window.electronAPI) return window.electronAPI;
+      if (window.electron) return window.electron;
+    }
+    return null;
+  }, []);
+
+  // Sync IPC events and status updates
+  useEffect(() => {
+    const electron = getElectronAPI();
+    if (!electron) return;
+
+    // Listen to live engine status updates (from hotkeys or Mini-HUD)
+    const unsubStatus = electron.onStatusUpdate((status) => {
+      setTelemetry((prev) => ({
+        ...prev,
+        isRunning: status.isRunning,
+        currentCps: status.cpsActual,
+        totalClicks: status.clicksPerformed,
+      }));
+    });
+
+    // Listen to Mini-HUD visibility changes
+    const unsubHudState = electron.onMiniHudStateChanged((visible) => {
+      setIsMiniHudActive(visible);
+    });
+
+    // Listen to global hotkey triggers
+    const unsubHotkeys = electron.onHotkeyTriggered((action) => {
+      if (action === 'toggle-clicker' || action === 'start-stop') {
+        // Handled by engine status update
+      } else if (action === 'emergency-stop' || action === 'panic-stop') {
+        setTelemetry((prev) => ({ ...prev, isRunning: false }));
+        addToast('EMERGENCY STOP TRIGGERED', 'Automation engines halted immediately.', 'error');
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubHudState();
+      unsubHotkeys();
+    };
+  }, [getElectronAPI, addToast]);
+
+  // Sync shared state with Electron whenever active preset or settings change
+  useEffect(() => {
+    const electron = getElectronAPI();
+    if (electron?.syncState) {
+      const activePreset = presets.find((p) => p.id === activePresetId);
+      const totalMs = 
+        clickConfig.interval.hours * 3600000 +
+        clickConfig.interval.minutes * 60000 +
+        clickConfig.interval.seconds * 1000 +
+        clickConfig.interval.milliseconds +
+        clickConfig.interval.microseconds / 1000;
+      const baseCps = totalMs > 0 ? Math.round(1000 / totalMs) : 20;
+
+      electron.syncState({
+        activeProfileName: activePreset?.name || 'Default Profile',
+        targetCps: baseCps,
+        hotkeys: {
+          toggleClicker: settings.hotkeys.startStop,
+          startStop: settings.hotkeys.startStop,
+          emergencyStop: settings.hotkeys.panicStop,
+          toggleMiniHud: settings.hotkeys.toggleMiniHud,
+        },
+        isMuted: !settings.soundEffects,
+        isAlwaysOnTop: settings.alwaysOnTop,
+      });
+    }
+  }, [activePresetId, presets, clickConfig.interval, settings.hotkeys, settings.soundEffects, settings.alwaysOnTop, getElectronAPI]);
+
   // Update Settings Partial
   const handleUpdateSettings = (newSettings: Partial<AppSettings>) => {
-    setSettings((prev) => ({ ...prev, ...newSettings }));
+    setSettings((prev) => {
+      const updated = { ...prev, ...newSettings };
+      const electron = getElectronAPI();
+      if (electron?.saveSettings) {
+        electron.saveSettings(updated as any);
+      }
+      return updated;
+    });
   };
 
   // Start / Stop Toggle Clicker
-  const handleToggleStartStop = useCallback(() => {
-    setTelemetry((prev) => {
-      const nextRunning = !prev.isRunning;
-      
-      if (nextRunning) {
-        if (settings.soundEffects) playUiChime('start');
-        addToast('HyperClick Engine Started', `Executing with hotkey [${settings.hotkeys.startStop}]`, 'success');
-      } else {
-        if (settings.soundEffects) playUiChime('stop');
-        addToast('HyperClick Engine Stopped', 'Session telemetry recorded.', 'info');
-      }
+  const handleToggleStartStop = useCallback(async () => {
+    const electron = getElectronAPI();
+    const nextRunning = !telemetry.isRunning;
+    
+    if (nextRunning) {
+      if (settings.soundEffects) playUiChime('start');
+      addToast('HyperClick Engine Started', `Executing with hotkey [${settings.hotkeys.startStop}]`, 'success');
+    } else {
+      if (settings.soundEffects) playUiChime('stop');
+      addToast('HyperClick Engine Stopped', 'Session telemetry recorded.', 'info');
+    }
 
-      // If in Electron, call IPC bridge
-      if (typeof window !== 'undefined' && (window as any).electron?.toggleClicker) {
-        (window as any).electron.toggleClicker({
-          isRunning: nextRunning,
-          clickConfig,
-          humanizerConfig,
+    if (electron) {
+      if (electron.toggleClickerEngine) {
+        const st = await electron.toggleClickerEngine();
+        setTelemetry((prev) => ({
+          ...prev,
+          isRunning: st.isRunning,
+          currentCps: st.cpsActual,
+          totalClicks: st.clicksPerformed,
+        }));
+      } else if (nextRunning && electron.startClicker) {
+        const totalMs = 
+          clickConfig.interval.hours * 3600000 +
+          clickConfig.interval.minutes * 60000 +
+          clickConfig.interval.seconds * 1000 +
+          clickConfig.interval.milliseconds +
+          clickConfig.interval.microseconds / 1000;
+        const baseCps = totalMs > 0 ? Math.round(1000 / totalMs) : 20;
+
+        await electron.startClicker({
+          clickType: clickConfig.mouseButton as any || 'left',
+          cps: baseCps,
+          clickIntervalMs: Math.max(1, totalMs),
+          repeatMode: clickConfig.repeatMode as any || 'infinite',
+          repeatCount: clickConfig.repeatCount,
+          repeatDurationMs: clickConfig.repeatDurationMs,
+          locationMode: clickConfig.cursorMode as any || 'current',
+          fixedX: clickConfig.fixedCoords.x,
+          fixedY: clickConfig.fixedCoords.y,
+          waypoints: [],
+          waypointLoopMode: 'sequential',
+          waypointRepeatCount: 0,
+          humanizer: {
+            enabled: humanizerConfig.enabled,
+            jitterRadius: humanizerConfig.jitterRadius,
+            timingVariancePercent: humanizerConfig.timingVariancePercent,
+            fatigueEnabled: humanizerConfig.fatigueSimulation,
+            fatigueFactor: humanizerConfig.fatigueDecayRate / 10,
+            microBreaks: humanizerConfig.microPauses,
+            microBreakIntervalSec: 30,
+            bezierMovement: humanizerConfig.bezierMovement,
+            movementSpeed: 5,
+            distribution: humanizerConfig.distribution as any || 'gaussian',
+          },
+          audioFeedback: settings.soundEffects,
+          soundTheme: 'cyber_click',
+          soundVolume: Math.round(settings.soundVolume * 100),
+        });
+
+        setTelemetry((prev) => ({ ...prev, isRunning: true }));
+      } else if (!nextRunning && electron.stopClicker) {
+        await electron.stopClicker();
+        setTelemetry((prev) => ({ ...prev, isRunning: false }));
+      }
+    } else {
+      setTelemetry((prev) => ({
+        ...prev,
+        isRunning: nextRunning,
+      }));
+    }
+  }, [telemetry.isRunning, settings.soundEffects, settings.hotkeys.startStop, settings.soundVolume, getElectronAPI, clickConfig, humanizerConfig, addToast]);
+
+  // Mini-HUD Window Popout / Toggling
+  const handleToggleMiniHud = useCallback(async () => {
+    const electron = getElectronAPI();
+    if (electron) {
+      const activePreset = presets.find((p) => p.id === activePresetId);
+      const totalMs = 
+        clickConfig.interval.hours * 3600000 +
+        clickConfig.interval.minutes * 60000 +
+        clickConfig.interval.seconds * 1000 +
+        clickConfig.interval.milliseconds +
+        clickConfig.interval.microseconds / 1000;
+      const baseCps = totalMs > 0 ? Math.round(1000 / totalMs) : 20;
+
+      // Sync state right before opening
+      if (electron.syncState) {
+        await electron.syncState({
+          activeProfileName: activePreset?.name || 'Default Profile',
+          targetCps: baseCps,
+          hotkeys: {
+            toggleClicker: settings.hotkeys.startStop,
+            startStop: settings.hotkeys.startStop,
+            emergencyStop: settings.hotkeys.panicStop,
+            toggleMiniHud: settings.hotkeys.toggleMiniHud,
+          },
+          isMuted: !settings.soundEffects,
+          isAlwaysOnTop: true,
         });
       }
 
-      return {
-        ...prev,
-        isRunning: nextRunning,
-      };
-    });
-  }, [settings.soundEffects, settings.hotkeys.startStop, clickConfig, humanizerConfig, addToast]);
+      if (isMiniHudActive) {
+        if (electron.expandMiniHud) {
+          await electron.expandMiniHud();
+        } else if (electron.toggleMiniHud) {
+          await electron.toggleMiniHud(false);
+        }
+        setIsMiniHudActive(false);
+      } else {
+        if (electron.popoutMiniHud) {
+          await electron.popoutMiniHud(false);
+        } else if (electron.toggleMiniHud) {
+          await electron.toggleMiniHud(true);
+        }
+        setIsMiniHudActive(true);
+        addToast('Mini-HUD Detached', 'Floating always-on-top HUD activated.', 'info');
+      }
+    } else {
+      setIsMiniHudActive((prev) => !prev);
+    }
+  }, [getElectronAPI, presets, activePresetId, clickConfig.interval, settings.hotkeys, settings.soundEffects, isMiniHudActive, addToast]);
 
   // Panic Stop Kill Switch (F12)
-  const handlePanicStop = useCallback(() => {
+  const handlePanicStop = useCallback(async () => {
+    const electron = getElectronAPI();
+    if (electron?.stopClicker) {
+      await electron.stopClicker();
+    }
     setTelemetry((prev) => ({ ...prev, isRunning: false }));
     setIsPlayingMacro(false);
     setIsRecordingMacro(false);
     if (settings.soundEffects) playUiChime('stop');
     addToast('EMERGENCY KILL TRIGGERED', 'All automation engines halted immediately.', 'error');
-  }, [settings.soundEffects, addToast]);
+  }, [settings.soundEffects, getElectronAPI, addToast]);
+
 
   // Screen Location Picker Trigger
   const handlePickLocation = useCallback(() => {
@@ -321,13 +504,13 @@ export const App: React.FC = () => {
         handlePickLocation();
       } else if (e.key.toUpperCase() === settings.hotkeys.toggleMiniHud.toUpperCase()) {
         e.preventDefault();
-        setIsMiniHudActive((prev) => !prev);
+        handleToggleMiniHud();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [settings.hotkeys, handleToggleStartStop, handlePanicStop, handlePickLocation]);
+  }, [settings.hotkeys, handleToggleStartStop, handlePanicStop, handlePickLocation, handleToggleMiniHud]);
 
   // Real-Time High Frequency Engine Simulation & Telemetry Loop
   useEffect(() => {
@@ -408,7 +591,7 @@ export const App: React.FC = () => {
         telemetry={telemetry}
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
-        onToggleMiniHud={() => setIsMiniHudActive(!isMiniHudActive)}
+        onToggleMiniHud={handleToggleMiniHud}
         isMiniHudActive={isMiniHudActive}
         onPanicStop={handlePanicStop}
         onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
@@ -516,8 +699,8 @@ export const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Floating Mini HUD Mode */}
-      {isMiniHudActive && (
+      {/* Floating Mini HUD Mode (In-App Fallback for Non-Electron Web Mode) */}
+      {!isElectron && isMiniHudActive && (
         <MiniHud
           isRunning={telemetry.isRunning}
           onToggleStartStop={handleToggleStartStop}
