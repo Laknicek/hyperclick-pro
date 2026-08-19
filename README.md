@@ -13,7 +13,7 @@
 
 **Next-Generation Ultra-Fast Desktop Automation & Accessibility Workstation for Windows 10 & 11**
 
-[![Version](https://img.shields.io/badge/Version-2026.1.0-00f2fe?style=for-the-badge&logo=electron&logoColor=white)](https://github.com/Laknicek/hyperclick-pro)
+[![Version](https://img.shields.io/badge/Version-v1.1.0-00f2fe?style=for-the-badge&logo=electron&logoColor=white)](https://github.com/Laknicek/hyperclick-pro)
 [![License](https://img.shields.io/badge/License-MIT-00f5a0?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-4facfe?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Laknicek/hyperclick-pro/releases)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/Laknicek/hyperclick-pro)
@@ -178,7 +178,7 @@ HyperClick Pro 2026 includes pre-calibrated profiles for productivity, accessibi
 
 ### Option 1: Official NSIS Installer (Recommended)
 
-1. Download the latest `HyperClick-Pro-Setup-2026.1.0.exe` from the [Releases](https://github.com/Laknicek/hyperclick-pro/releases) page.
+1. Download the latest `HyperClick-Pro-Setup-1.1.0.exe` from the [Releases](https://github.com/Laknicek/hyperclick-pro/releases) page.
 2. Run the installer. Choose standard installation or select a **custom directory**.
 3. Select desired shortcuts (Desktop, Start Menu).
 4. Launch **HyperClick Pro 2026**!
@@ -186,7 +186,7 @@ HyperClick Pro 2026 includes pre-calibrated profiles for productivity, accessibi
 ### Option 2: Portable Standalone Executable
 
 No installation or administrative privileges required:
-1. Download `HyperClick-Pro-Portable-2026.1.0.exe`.
+1. Download `HyperClick-Pro-Portable-1.1.0.exe`.
 2. Move to any folder or USB drive and double-click to run.
 
 ### Option 3: Build from Source

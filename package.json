@@ -1,6 +1,6 @@
 {
   "name": "hyperclick-pro",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "HyperClick Pro - Next-Generation Ultra-Fast 2026 UI/UX Auto-Clicker & Automation Suite",
   "main": "dist-electron/main.js",
   "scripts": {
